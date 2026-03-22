@@ -37,7 +37,11 @@
     width: 100%;
     max-width: 100%;
     min-height: clamp(36rem, 100dvh, 2200px);
-    display: block;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    /* 防止宿主消息容器把子项压成 0 高 */
+    align-self: stretch;
   }
 }
 

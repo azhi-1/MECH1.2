@@ -827,7 +827,8 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
 // --- Main App ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>(null);
+  // 默认打开状态总览：activeTab 为 null 时右侧主面板整段 `hidden`，在 ST 里会像「只有灰底没有 UI」
+  const [activeTab, setActiveTab] = useState<Tab>('STATUS');
   const [time, setTime] = useState(new Date());
   const [bgUrl, setBgUrl] = useState('');
   const [showBgSettings, setShowBgSettings] = useState(false);
@@ -874,7 +875,7 @@ export default function App() {
   // Shell: inline height 防止宿主 CSS 覆盖 Tailwind；globalThis 取 API 避免 ReferenceError 白屏。
   return (
     <div
-      className="relative w-full max-w-full min-h-0 bg-[#050808] overflow-hidden flex flex-col text-[var(--color-ac-text)] selection:bg-[var(--color-ac-ui)]/30"
+      className="relative w-full max-w-full min-h-0 flex-1 bg-[#050808] overflow-hidden flex flex-col text-[var(--color-ac-text)] selection:bg-[var(--color-ac-ui)]/30"
       style={{ minHeight: shellDim, height: shellDim, boxSizing: 'border-box' }}
     >
       {/* Background Layer */}
