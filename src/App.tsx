@@ -19,6 +19,8 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { twMerge } from 'tailwind-merge';
+import type { StatusDisplay } from './statDataTypes';
+import { useStatData } from './useStatData';
 
 // Utility for merging tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -28,29 +30,7 @@ function cn(...inputs: ClassValue[]) {
 // --- Types ---
 type Tab = 'STATUS' | 'GARAGE' | 'ROMANCE' | 'MISSIONS' | 'ALLMIND' | 'SETTINGS' | null;
 
-// --- Mock Data ---
-const MOCK_PLAYER = {
-  name: 'RAVEN',
-  hp: 100,
-  maxHp: 100,
-  sp: 85,
-  maxSp: 100,
-  qi: {
-    name: '虚空凝视',
-    level: 4,
-    progress: 78,
-    effect: '神经同步率上限突破 +15%',
-  },
-  stats: {
-    apm: 342,
-    syncRate: 89.5,
-  },
-  funds: {
-    federal: 450200,
-    imperial: 12050,
-  },
-};
-
+// --- Mock Data (机库/任务等尚未接 MVU 时沿用) ---
 const MOCK_MECH = {
   name: 'LOADER 4',
   tier: 3,
@@ -159,7 +139,7 @@ const StatRow = ({ label, value, unit = '' }: { label: string; value: string | n
 
 // --- Views ---
 
-const StatusView = () => (
+const StatusView = ({ display }: { display: StatusDisplay }) => (
   <motion.div
     initial={{ opacity: 0, x: -20 }}
     animate={{ opacity: 1, x: 0 }}
@@ -175,7 +155,7 @@ const StatusView = () => (
       </div>
       <div className="text-right">
         <div className="text-[10px] md:text-xs text-[var(--color-ac-ui)] uppercase">Callsign</div>
-        <div className="text-lg md:text-xl font-mono tracking-widest">{MOCK_PLAYER.name}</div>
+        <div className="text-lg md:text-xl font-mono tracking-widest">{display.callsign}</div>
       </div>
     </div>
 
@@ -189,14 +169,14 @@ const StatusView = () => (
           <div className="flex flex-col gap-4">
             <ProgressBar
               label="HP (生命体征)"
-              value={MOCK_PLAYER.hp}
-              max={MOCK_PLAYER.maxHp}
+              value={display.hp}
+              max={display.maxHp}
               colorClass="bg-red-500/80"
             />
             <ProgressBar
               label="SP (精神阈值)"
-              value={MOCK_PLAYER.sp}
-              max={MOCK_PLAYER.maxSp}
+              value={display.sp}
+              max={display.maxSp}
               colorClass="bg-blue-400/80"
             />
           </div>
@@ -207,8 +187,8 @@ const StatusView = () => (
             <Cpu size={16} /> 驾驶属性
           </h3>
           <div className="flex flex-col gap-2">
-            <StatRow label="有效手速 (APM)" value={MOCK_PLAYER.stats.apm} />
-            <StatRow label="神经同步率" value={MOCK_PLAYER.stats.syncRate.toFixed(1)} unit="%" />
+            <StatRow label="有效手速 (APM)" value={display.apm} />
+            <StatRow label="神经同步率" value={display.syncRate.toFixed(1)} unit="%" />
           </div>
         </div>
 
@@ -218,13 +198,13 @@ const StatusView = () => (
           </h3>
           <div className="flex flex-col gap-2">
             <div className="flex justify-between items-end mb-2">
-              <span className="text-base md:text-lg font-bold">{MOCK_PLAYER.qi.name}</span>
+              <span className="text-base md:text-lg font-bold">{display.qiName}</span>
               <span className="font-mono text-[10px] md:text-xs text-[var(--color-ac-ui)]">
-                Tier {MOCK_PLAYER.qi.level}
+                Tier {display.qiTier}
               </span>
             </div>
-            <ProgressBar label="修习进度" value={MOCK_PLAYER.qi.progress} max={100} />
-            <p className="text-xs text-[var(--color-ac-ui)] mt-2 leading-relaxed">[被动效果] {MOCK_PLAYER.qi.effect}</p>
+            <ProgressBar label="修习进度" value={display.qiProgressPct} max={100} />
+            <p className="text-xs text-[var(--color-ac-ui)] mt-2 leading-relaxed">[被动效果] {display.qiEffect}</p>
           </div>
         </div>
       </div>
@@ -239,18 +219,12 @@ const StatusView = () => (
             <Database size={16} /> 当前机甲
           </h3>
           <div className="mb-4">
-            <div className="text-lg md:text-xl font-mono tracking-widest">{MOCK_MECH.name}</div>
-            <div className="text-xs text-[var(--color-ac-ui)]">装甲等级: T{MOCK_MECH.tier}</div>
+            <div className="text-lg md:text-xl font-mono tracking-widest">{display.mechName}</div>
+            <div className="text-xs text-[var(--color-ac-ui)]">装甲等级: {display.armorTierLabel}</div>
           </div>
           <div className="flex flex-col gap-1">
-            <StatRow label="结构值 (AP)" value={MOCK_MECH.ap} />
-            <StatRow label="防御性能" value={MOCK_MECH.defense} />
-            <StatRow label="肢体稳定性能" value={MOCK_MECH.stability} />
-            <StatRow label="推进速度" value={MOCK_MECH.speed} />
-          </div>
-          <div className="mt-4 flex flex-col gap-3">
-            <ProgressBar label="承载状况" value={MOCK_MECH.load} max={100} />
-            <ProgressBar label="EN负荷状况" value={MOCK_MECH.enLoad} max={100} />
+            <StatRow label="结构值" value={display.structureAp} />
+            <StatRow label="装甲值" value={display.armorValue} />
           </div>
         </div>
 
@@ -259,8 +233,8 @@ const StatusView = () => (
             <Coins size={16} /> 资金账户
           </h3>
           <div className="flex flex-col gap-2">
-            <StatRow label="联邦币 (COAM)" value={MOCK_PLAYER.funds.federal.toLocaleString()} />
-            <StatRow label="帝国币" value={MOCK_PLAYER.funds.imperial.toLocaleString()} />
+            <StatRow label="联邦币 (COAM)" value={display.federal.toLocaleString()} />
+            <StatRow label="帝国币" value={display.imperial.toLocaleString()} />
           </div>
         </div>
       </div>
@@ -872,6 +846,7 @@ export default function App() {
   const [bgUrl, setBgUrl] = useState('');
   const [showBgSettings, setShowBgSettings] = useState(false);
   const [chatInput, setChatInput] = useState('');
+  const { display } = useStatData();
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -906,9 +881,9 @@ export default function App() {
     setActiveTab(prev => (prev === id ? null : id));
   };
 
-  // Shell height: clamp = mobile floor (22rem) + viewport (85dvh) + desktop cap (1200px); w-full avoids w-screen breaking ST bubbles.
+  // Shell: taller clamp for ST embed; w-full avoids w-screen breaking bubbles.
   return (
-    <div className="relative w-full max-w-full h-[clamp(22rem,85dvh,1200px)] bg-[#050808] overflow-hidden flex text-[var(--color-ac-text)] selection:bg-[var(--color-ac-ui)]/30">
+    <div className="relative w-full max-w-full h-[clamp(32rem,96dvh,1800px)] bg-[#050808] overflow-hidden flex text-[var(--color-ac-text)] selection:bg-[var(--color-ac-ui)]/30">
       {/* Background Layer */}
       {bgUrl ? (
         <div
@@ -932,8 +907,10 @@ export default function App() {
           </span>
         </div>
         <div className="flex gap-4 md:gap-6">
-          <span className="hidden md:inline">LOC: SECTOR 4 - RUBICON</span>
-          <span>{time.toISOString().replace('T', ' ').substring(0, 19)} UTC</span>
+          <span className="hidden md:inline">{display.locLine}</span>
+          <span>
+            {display.gameTime || `${time.toISOString().replace('T', ' ').substring(0, 19)} UTC`}
+          </span>
         </div>
       </div>
 
@@ -1049,7 +1026,7 @@ export default function App() {
             <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b border-r border-[var(--color-ac-ui)] opacity-30" />
 
             <AnimatePresence mode="wait">
-              {activeTab === 'STATUS' && <StatusView key="STATUS" />}
+              {activeTab === 'STATUS' && <StatusView key="STATUS" display={display} />}
               {activeTab === 'GARAGE' && <GarageView key="GARAGE" onEquip={handleEquip} />}
               {activeTab === 'ROMANCE' && <RomanceView key="ROMANCE" />}
               {activeTab === 'MISSIONS' && <MissionView key="MISSIONS" />}

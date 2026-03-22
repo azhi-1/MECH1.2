@@ -17,7 +17,7 @@
   html {
     width: 100%;
     max-width: 100%;
-    min-height: clamp(22rem, 85dvh, 1200px);
+    min-height: clamp(32rem, 96dvh, 1800px);
   }
 
   body {
@@ -27,7 +27,7 @@
     overflow: hidden;
     width: 100%;
     max-width: 100%;
-    min-height: clamp(22rem, 85dvh, 1200px);
+    min-height: clamp(32rem, 96dvh, 1800px);
     /* Prevent text selection for a more app-like feel */
     user-select: none;
   }
@@ -35,7 +35,7 @@
   #root {
     width: 100%;
     max-width: 100%;
-    min-height: clamp(22rem, 85dvh, 1200px);
+    min-height: clamp(32rem, 96dvh, 1800px);
   }
 }
 
