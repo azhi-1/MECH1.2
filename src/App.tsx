@@ -881,9 +881,14 @@ export default function App() {
     setActiveTab(prev => (prev === id ? null : id));
   };
 
-  // Shell: taller clamp for ST embed; w-full avoids w-screen breaking bubbles.
+  const shellDim = 'clamp(36rem, 100dvh, 2200px)';
+
+  // Shell: inline height 防止宿主 CSS 覆盖 Tailwind；globalThis 取 API 避免 ReferenceError 白屏。
   return (
-    <div className="relative w-full max-w-full h-[clamp(32rem,96dvh,1800px)] bg-[#050808] overflow-hidden flex text-[var(--color-ac-text)] selection:bg-[var(--color-ac-ui)]/30">
+    <div
+      className="relative w-full max-w-full min-h-0 bg-[#050808] overflow-hidden flex flex-col text-[var(--color-ac-text)] selection:bg-[var(--color-ac-ui)]/30"
+      style={{ minHeight: shellDim, height: shellDim, boxSizing: 'border-box' }}
+    >
       {/* Background Layer */}
       {bgUrl ? (
         <div

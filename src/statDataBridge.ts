@@ -1,4 +1,5 @@
 import type { StatData, StatusDisplay } from './statDataTypes';
+import { rtGetChatMessages, rtGetLastMessageId, rtGetMvu, rtGetVariables } from './tavernRuntime';
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
@@ -20,13 +21,13 @@ export function formatArmorTier(raw: string | undefined): string {
  * 自最新楼层向前，取最后一条 assistant 楼层 id（与创作提示词一致）。
  */
 export function findLastAssistantMessageId(): number | null {
-  if (typeof getLastMessageId !== 'function' || typeof getChatMessages !== 'function') {
-    return null;
-  }
+  const getLast = rtGetLastMessageId();
+  const getMsgs = rtGetChatMessages();
+  if (!getLast || !getMsgs) return null;
   try {
-    const lastId = getLastMessageId();
+    const lastId = getLast();
     if (lastId < 0) return null;
-    const msgs = getChatMessages(`0-${lastId}`, { role: 'assistant' });
+    const msgs = getMsgs(`0-${lastId}`, { role: 'assistant' });
     if (!msgs.length) return null;
     return msgs[msgs.length - 1].message_id;
   } catch {
@@ -38,7 +39,8 @@ export function findLastAssistantMessageId(): number | null {
  * 从指定消息楼层读取 stat_data：优先 Mvu.getMvuData，否则 getVariables。
  */
 export function readStatDataFromMessage(messageId: number): StatData | undefined {
-  if (typeof Mvu !== 'undefined' && Mvu?.getMvuData) {
+  const Mvu = rtGetMvu();
+  if (Mvu) {
     try {
       const pack = Mvu.getMvuData({ type: 'message', message_id: messageId });
       const sd = asStatData(pack?.stat_data);
@@ -47,7 +49,8 @@ export function readStatDataFromMessage(messageId: number): StatData | undefined
       /* 降级 */
     }
   }
-  if (typeof getVariables === 'function') {
+  const getVariables = rtGetVariables();
+  if (getVariables) {
     try {
       const v = getVariables({ type: 'message', message_id: messageId });
       const sd = asStatData((v as { stat_data?: unknown }).stat_data);

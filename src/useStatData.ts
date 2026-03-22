@@ -5,9 +5,10 @@ import {
   findLastAssistantMessageId,
   readStatDataFromMessage,
 } from './statDataBridge';
+import { rtEventOn, rtGetLastMessageId, rtGetMvu, rtGetTavernEvents } from './tavernRuntime';
 
 function isTavernHost(): boolean {
-  return typeof getLastMessageId === 'function';
+  return rtGetLastMessageId() !== undefined;
 }
 
 function asStatDataLoose(v: unknown): StatData | undefined {
@@ -42,17 +43,20 @@ export function useStatData(pollMs = 900) {
 
     const stops: Array<{ stop: () => void }> = [];
 
-    if (typeof eventOn === 'function') {
+    const eventOn = rtEventOn();
+    const te = rtGetTavernEvents();
+    if (eventOn && te) {
       try {
-        stops.push(eventOn(tavern_events.MESSAGE_UPDATED, refreshFromMessages));
-        stops.push(eventOn(tavern_events.CHARACTER_MESSAGE_RENDERED, refreshFromMessages));
-        stops.push(eventOn(tavern_events.MESSAGE_RECEIVED, refreshFromMessages));
+        stops.push(eventOn(te.MESSAGE_UPDATED, refreshFromMessages));
+        stops.push(eventOn(te.CHARACTER_MESSAGE_RENDERED, refreshFromMessages));
+        stops.push(eventOn(te.MESSAGE_RECEIVED, refreshFromMessages));
       } catch {
         /* 非宿主环境 */
       }
     }
 
-    if (typeof eventOn === 'function' && typeof Mvu !== 'undefined' && Mvu?.events) {
+    const Mvu = rtGetMvu();
+    if (eventOn && Mvu?.events?.VARIABLE_UPDATE_ENDED) {
       try {
         stops.push(
           eventOn(Mvu.events.VARIABLE_UPDATE_ENDED, (...args: unknown[]) => {

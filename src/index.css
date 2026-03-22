@@ -17,17 +17,18 @@
   html {
     width: 100%;
     max-width: 100%;
-    min-height: clamp(32rem, 96dvh, 1800px);
+    min-height: clamp(36rem, 100dvh, 2200px);
   }
 
   body {
     background-color: var(--color-ac-bg);
     color: var(--color-ac-text);
     font-family: var(--font-sans);
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     width: 100%;
     max-width: 100%;
-    min-height: clamp(32rem, 96dvh, 1800px);
+    min-height: clamp(36rem, 100dvh, 2200px);
     /* Prevent text selection for a more app-like feel */
     user-select: none;
   }
@@ -35,7 +36,8 @@
   #root {
     width: 100%;
     max-width: 100%;
-    min-height: clamp(32rem, 96dvh, 1800px);
+    min-height: clamp(36rem, 100dvh, 2200px);
+    display: block;
   }
 }
 
