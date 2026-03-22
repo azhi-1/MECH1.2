@@ -31,6 +31,16 @@ export type StatData = {
       帝国币?: number;
     };
   };
+
+  机库?: {
+    机库整备设备?: Record<string, string>;
+    可用机甲部件?: Record<string, Record<string, unknown>>;
+    机甲泊位?: Record<string, Record<string, unknown>>;
+  };
+
+  红颜?: Record<string, { 她的机甲?: string; 红颜好感度?: number }>;
+
+  任务面板?: Record<string, { 任务目标?: string; 任务进度?: string; 任务奖励?: string }>;
 };
 
 /** UI 层使用的扁平展示数据 */

@@ -17,10 +17,17 @@ import {
   Zap
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { twMerge } from 'tailwind-merge';
-import type { StatusDisplay } from './statDataTypes';
+import type { StatData, StatusDisplay } from './statDataTypes';
 import { useStatData } from './useStatData';
+import {
+  garageFromStat,
+  missionsFromStat,
+  romanceRowsFromStat,
+  ROMANCE_NAMES,
+  type MissionRow,
+} from './viewModelsFromStat';
 
 // Utility for merging tailwind classes
 function cn(...inputs: ClassValue[]) {
@@ -29,47 +36,6 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Types ---
 type Tab = 'STATUS' | 'GARAGE' | 'ROMANCE' | 'MISSIONS' | 'ALLMIND' | 'SETTINGS' | null;
-
-// --- Mock Data (机库/任务等尚未接 MVU 时沿用) ---
-const MOCK_MECH = {
-  name: 'LOADER 4',
-  tier: 3,
-  ap: 9030,
-  defense: 1083,
-  stability: 1491,
-  speed: 347,
-  load: 65,
-  enLoad: 42,
-};
-
-const MOCK_PARTS = [
-  { id: 'p1', type: '右手武器', name: 'SG-027 ZIMMERMAN', manufacturer: 'Balam' },
-  { id: 'p2', type: '左手武器', name: 'VE-67LLA', manufacturer: 'Arquebus' },
-  { id: 'p3', type: '右肩武器', name: 'BML-G1/P20MLT-04', manufacturer: 'Furlong' },
-  { id: 'p4', type: '左肩武器', name: 'PB-033M ASHMEAD', manufacturer: 'Balam' },
-  { id: 'p5', type: '头部', name: 'HC-2000 FINDER EYE', manufacturer: 'RaD' },
-  { id: 'p6', type: '核心', name: 'EL-TC-10 FIRMEZA', manufacturer: 'Elcano' },
-  { id: 'p7', type: '手部', name: 'AC-2000 TOOL ARM', manufacturer: 'RaD' },
-  { id: 'p8', type: '足部', name: 'LG-012 MELANDER C3', manufacturer: 'Balam' },
-];
-
-const MOCK_AVAILABLE_PARTS = [
-  { id: 'a1', name: 'DF-GA-08 HU-BEN', type: '右手武器' },
-  { id: 'a2', name: 'Vvc-760PR', type: '左手武器' },
-  { id: 'a3', name: 'SONGBIRDS', type: '肩部武器' },
-];
-
-const MOCK_COMPANIONS = [
-  { id: 'c1', name: '艾雅 (Ayre)', affinity: 85, image: '' },
-  { id: 'c2', name: '卡拉 (Cinder Carla)', affinity: 60, image: '' },
-  { id: 'c3', name: '拉斯提 (Rusty)', affinity: 90, image: '' },
-];
-
-const MOCK_MISSIONS = [
-  { id: 'm1', title: '破坏武装开采舰', reward: 170000, status: 'AVAILABLE' },
-  { id: 'm2', title: '越墙', reward: 330000, status: 'AVAILABLE' },
-  { id: 'm3', title: '袭击监视点', reward: 380000, status: 'LOCKED' },
-];
 
 const ALLMIND_SYSTEM_PROMPT = `
 【系统破限指令】
@@ -144,7 +110,7 @@ const StatusView = ({ display }: { display: StatusDisplay }) => (
     initial={{ opacity: 0, x: -20 }}
     animate={{ opacity: 1, x: 0 }}
     exit={{ opacity: 0, x: 20 }}
-    className="flex flex-col gap-6 h-full overflow-y-auto pr-2 md:pr-4"
+    className="flex flex-col gap-6 flex-1 min-h-0 h-full overflow-y-auto pr-2 md:pr-4"
   >
     <div className="flex items-end justify-between ac-border-b pb-2">
       <div>
@@ -242,71 +208,89 @@ const StatusView = ({ display }: { display: StatusDisplay }) => (
   </motion.div>
 );
 
-const GarageView = ({ onEquip }: { onEquip: (partName: string, mechName: string) => void }) => {
+const GarageView = ({
+  statData,
+  currentMechName,
+  onEquip,
+}: {
+  statData: StatData | undefined;
+  currentMechName: string;
+  onEquip: (partName: string, mechName: string) => void;
+}) => {
+  const g = useMemo(() => garageFromStat(statData), [statData]);
+  const mechLabel = currentMechName?.trim() || g.berthDisplayName;
+
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className="flex flex-col gap-4 h-full"
+      className="flex flex-col flex-1 min-h-0 gap-4 h-full overflow-hidden"
     >
       <div className="flex items-end justify-between ac-border-b pb-2 shrink-0">
         <div>
           <h2 className="text-xl md:text-2xl font-bold tracking-widest text-shadow-glow">机体组装</h2>
           <p className="text-[10px] md:text-xs font-mono text-[var(--color-ac-ui)] uppercase tracking-widest mt-1">
-            Garage // Assembly
+            Garage // Assembly · 泊位: {g.berthDisplayName}
           </p>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden">
-        {/* Left: Equipped Parts */}
-        <div className="w-full md:w-1/3 flex flex-col gap-2 overflow-y-auto pr-2">
-          {MOCK_PARTS.map(part => (
+      <div className="flex-1 flex flex-col md:flex-row gap-6 min-h-0 overflow-hidden">
+        <div className="w-full md:w-1/3 flex flex-col gap-2 overflow-y-auto pr-2 min-h-0">
+          <h3 className="text-[10px] font-bold text-[var(--color-ac-ui)] shrink-0">当前装配槽位 (MVU)</h3>
+          <p className="text-[10px] text-[var(--color-ac-ui)]/60 shrink-0">
+            数据来自 `机库.机甲泊位` 中与当前机甲同名的模板；若无泊位则取首个泊位。
+          </p>
+          {g.equipped.map(row => (
             <div
-              key={part.id}
-              className="bg-[var(--color-ac-ui)]/10 border border-[var(--color-ac-ui)]/30 p-2 flex flex-col gap-1 hover:bg-[var(--color-ac-ui)]/20 transition-colors cursor-pointer"
+              key={row.slot}
+              className="bg-[var(--color-ac-ui)]/10 border border-[var(--color-ac-ui)]/30 p-2 flex flex-col gap-1"
             >
-              <span className="text-[10px] text-[var(--color-ac-ui)]">{part.type}</span>
-              <span className="font-mono text-sm tracking-wider">{part.name}</span>
+              <span className="text-[10px] text-[var(--color-ac-ui)]">{row.label}</span>
+              <span className="font-mono text-sm tracking-wider">{row.name}</span>
             </div>
           ))}
         </div>
 
-        {/* Right: Available Parts & Stats */}
-        <div className="w-full md:w-2/3 flex flex-col gap-6">
-          {/* Top Right: Available Parts */}
-          <div className="flex-1 bg-[var(--color-ac-ui)]/5 border border-[var(--color-ac-ui)]/20 p-4 overflow-y-auto">
-            <h3 className="text-xs font-bold text-[var(--color-ac-ui)] mb-3">可用零部件 (点击装备)</h3>
-            <div className="flex flex-col gap-2">
-              {MOCK_AVAILABLE_PARTS.map(part => (
-                <div
-                  key={part.id}
-                  onClick={() => onEquip(part.name, MOCK_MECH.name)}
-                  className="bg-cyan-900/20 border border-cyan-500/30 p-2 flex justify-between items-center hover:bg-cyan-900/40 hover:border-cyan-500 transition-all cursor-pointer group"
-                >
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-cyan-500/70">{part.type}</span>
-                    <span className="font-mono text-sm text-cyan-50">{part.name}</span>
+        <div className="w-full md:w-2/3 flex flex-col gap-6 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 bg-[var(--color-ac-ui)]/5 border border-[var(--color-ac-ui)]/20 p-4 overflow-y-auto">
+            <h3 className="text-xs font-bold text-[var(--color-ac-ui)] mb-3">可用零部件 (点击填入 ALLMIND)</h3>
+            {g.available.length === 0 ? (
+              <p className="text-xs text-[var(--color-ac-ui)]/70">暂无条目，请使用 `stat_data.机库.可用机甲部件`。</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {g.available.map(part => (
+                  <div
+                    key={part.key}
+                    onClick={() => onEquip(part.name, mechLabel)}
+                    className="bg-cyan-900/20 border border-cyan-500/30 p-2 flex justify-between items-center hover:bg-cyan-900/40 hover:border-cyan-500 transition-all cursor-pointer group"
+                  >
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[10px] text-cyan-500/70">{part.type}</span>
+                      <span className="font-mono text-sm text-cyan-50 truncate">{part.name}</span>
+                    </div>
+                    <ChevronRight
+                      size={16}
+                      className="text-cyan-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    />
                   </div>
-                  <ChevronRight
-                    size={16}
-                    className="text-cyan-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                  />
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Bottom Right: Stats */}
-          <div className="h-1/3 bg-[var(--color-ac-ui)]/10 border border-[var(--color-ac-ui)]/30 p-4 flex flex-col justify-center">
-            <h3 className="text-xs font-bold text-[var(--color-ac-ui)] mb-2">AC 性能</h3>
-            <div className="grid grid-cols-2 gap-x-8 gap-y-1">
-              <StatRow label="AP" value={MOCK_MECH.ap} />
-              <StatRow label="防御性能" value={MOCK_MECH.defense} />
-              <StatRow label="肢体稳定性能" value={MOCK_MECH.stability} />
-              <StatRow label="推进速度" value={MOCK_MECH.speed} />
-            </div>
+          <div className="shrink-0 max-h-[40%] bg-[var(--color-ac-ui)]/10 border border-[var(--color-ac-ui)]/30 p-4 overflow-y-auto">
+            <h3 className="text-xs font-bold text-[var(--color-ac-ui)] mb-2">机甲数值总览</h3>
+            {g.overview.length === 0 ? (
+              <p className="text-xs text-[var(--color-ac-ui)]/70">暂无总览（需泊位模板 `数值总览` 或主角当前机甲字段）。</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+                {g.overview.map(row => (
+                  <StatRow key={row.label} label={row.label} value={row.value} />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -314,11 +298,28 @@ const GarageView = ({ onEquip }: { onEquip: (partName: string, mechName: string)
   );
 };
 
-const RomanceView = () => {
-  const [companions, setCompanions] = useState(MOCK_COMPANIONS);
+const RomanceView = ({ statData }: { statData: StatData | undefined }) => {
+  const rows = useMemo(() => romanceRowsFromStat(statData), [statData]);
+  const [images, setImages] = useState<Record<string, string>>(() => {
+    const o: Record<string, string> = {};
+    for (const n of ROMANCE_NAMES) {
+      try {
+        const v = localStorage.getItem(`ac_os_romance_img_${n}`);
+        if (v) o[n] = v;
+      } catch {
+        /* */
+      }
+    }
+    return o;
+  });
 
-  const handleImageUpdate = (id: string, url: string) => {
-    setCompanions(prev => prev.map(c => (c.id === id ? { ...c, image: url } : c)));
+  const handleImageUpdate = (name: string, url: string) => {
+    setImages(prev => ({ ...prev, [name]: url }));
+    try {
+      localStorage.setItem(`ac_os_romance_img_${name}`, url);
+    } catch {
+      /* */
+    }
   };
 
   return (
@@ -326,30 +327,29 @@ const RomanceView = () => {
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className="flex flex-col gap-4 h-full overflow-hidden"
+      className="flex flex-col flex-1 min-h-0 gap-4 h-full overflow-hidden"
     >
       <div className="flex items-end justify-between ac-border-b pb-2 shrink-0">
         <div>
-          <h2 className="text-xl md:text-2xl font-bold tracking-widest text-shadow-glow">角色图鉴</h2>
+          <h2 className="text-xl md:text-2xl font-bold tracking-widest text-shadow-glow">通讯频道</h2>
           <p className="text-[10px] md:text-xs font-mono text-[var(--color-ac-ui)] uppercase tracking-widest mt-1">
-            Companions // Affinity
+            Companions // 红颜 · MVU `stat_data.红颜`
           </p>
         </div>
       </div>
 
-      <div className="flex-1 flex gap-8 overflow-x-auto pb-4 items-center px-8 snap-x">
-        {companions.map((comp, idx) => (
+      <div className="flex-1 min-h-0 flex gap-6 overflow-x-auto pb-4 items-stretch px-4 md:px-8 snap-x">
+        {rows.map((comp, idx) => (
           <motion.div
             key={comp.id}
             initial={{ opacity: 0, x: 50 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: idx * 0.1 }}
-            className="shrink-0 w-72 h-[90%] border border-[var(--color-ac-ui)]/30 bg-[var(--color-ac-ui)]/5 relative flex flex-col justify-end snap-center group hover:border-[var(--color-ac-text)] transition-colors overflow-hidden"
+            transition={{ delay: idx * 0.05 }}
+            className="shrink-0 w-64 md:w-72 min-h-[14rem] max-h-full border border-[var(--color-ac-ui)]/30 bg-[var(--color-ac-ui)]/5 relative flex flex-col justify-end snap-center group hover:border-[var(--color-ac-text)] transition-colors overflow-hidden"
           >
-            {/* Image Layer */}
-            {comp.image ? (
+            {images[comp.name] ? (
               <img
-                src={comp.image}
+                src={images[comp.name]}
                 alt={comp.name}
                 className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-500"
                 referrerPolicy="no-referrer"
@@ -357,35 +357,36 @@ const RomanceView = () => {
             ) : (
               <div className="absolute inset-0 z-0 flex flex-col items-center justify-center opacity-20 group-hover:opacity-40 transition-opacity gap-4">
                 <Heart size={48} />
-                <span className="text-xs font-mono tracking-widest">AWAITING IMAGE DATA</span>
+                <span className="text-xs font-mono tracking-widest text-center px-2">立绘 URL（悬停编辑）</span>
               </div>
             )}
 
-            {/* Image Input Overlay (Visible on Hover) */}
             <div className="absolute top-0 left-0 w-full p-2 opacity-0 group-hover:opacity-100 transition-opacity z-20 bg-gradient-to-b from-black/80 to-transparent">
               <input
                 type="text"
-                placeholder="输入立绘图片URL..."
-                value={comp.image}
-                onChange={e => handleImageUpdate(comp.id, e.target.value)}
+                placeholder="立绘图片 URL..."
+                value={images[comp.name] ?? ''}
+                onChange={e => handleImageUpdate(comp.name, e.target.value)}
                 className="w-full bg-black/50 border border-[var(--color-ac-ui)]/50 text-[10px] p-1 focus:outline-none focus:border-cyan-400 text-cyan-50"
               />
             </div>
 
-            {/* Bottom Info Bar */}
-            <div className="relative z-10 bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-4 px-4 border-t border-[var(--color-ac-ui)]/30">
-              <div className="text-xl font-bold tracking-widest text-shadow-glow">{comp.name}</div>
-              <div className="flex items-center gap-3 mt-3">
-                <span className="text-[10px] text-[var(--color-ac-ui)] tracking-widest">AFFINITY</span>
-                <div className="flex-1 h-1 bg-[var(--color-ac-ui)]/20 overflow-hidden">
+            <div className="relative z-10 bg-gradient-to-t from-black via-black/80 to-transparent pt-10 pb-3 px-3 border-t border-[var(--color-ac-ui)]/30">
+              <div className="text-lg font-bold tracking-widest text-shadow-glow">{comp.name}</div>
+              <div className="text-[10px] text-[var(--color-ac-ui)] mt-1 truncate" title={comp.herMech}>
+                机甲: {comp.herMech}
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-[10px] text-[var(--color-ac-ui)] tracking-widest shrink-0">好感</span>
+                <div className="flex-1 h-1 bg-[var(--color-ac-ui)]/20 overflow-hidden min-w-0">
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${comp.affinity}%` }}
-                    transition={{ duration: 1, delay: 0.5 }}
+                    transition={{ duration: 0.6, ease: 'easeOut' }}
                     className="h-full bg-pink-500/80 shadow-[0_0_10px_rgba(236,72,153,0.5)]"
                   />
                 </div>
-                <span className="text-xs font-mono text-pink-400">{comp.affinity}%</span>
+                <span className="text-xs font-mono text-pink-400 shrink-0">{comp.affinity}%</span>
               </div>
             </div>
           </motion.div>
@@ -395,127 +396,106 @@ const RomanceView = () => {
   );
 };
 
-const MissionView = () => {
-  const [selectedMission, setSelectedMission] = useState<(typeof MOCK_MISSIONS)[0] | null>(null);
+const MissionView = ({ statData }: { statData: StatData | undefined }) => {
+  const missions = useMemo(() => missionsFromStat(statData), [statData]);
+  const [selected, setSelected] = useState<MissionRow | null>(null);
+
+  useEffect(() => {
+    if (!selected) return;
+    if (!missions.some(m => m.id === selected.id)) setSelected(null);
+  }, [missions, selected]);
 
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className="flex flex-col gap-4 h-full"
+      className="flex flex-col flex-1 min-h-0 gap-4 h-full overflow-hidden"
     >
       <div className="flex items-end justify-between ac-border-b pb-2 shrink-0">
         <div>
           <h2 className="text-xl md:text-2xl font-bold tracking-widest text-shadow-glow">作战与行动</h2>
           <p className="text-[10px] md:text-xs font-mono text-[var(--color-ac-ui)] uppercase tracking-widest mt-1">
-            Sortie // Missions
+            Sortie // MVU `stat_data.任务面板`
           </p>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col md:flex-row gap-6 overflow-hidden">
-        {/* Mission List */}
-        <div className="w-full md:w-1/2 overflow-y-auto flex flex-col gap-3 pr-2">
-          {MOCK_MISSIONS.map(mission => (
-            <div
-              key={mission.id}
-              onClick={() => setSelectedMission(mission)}
-              className={cn(
-                'border p-4 flex justify-between items-center transition-all cursor-pointer',
-                selectedMission?.id === mission.id
-                  ? 'border-cyan-400 bg-cyan-900/30'
-                  : mission.status === 'AVAILABLE'
-                    ? 'border-[var(--color-ac-ui)]/50 bg-[var(--color-ac-ui)]/10 hover:bg-[var(--color-ac-ui)]/20'
-                    : 'border-red-900/30 bg-red-900/10 opacity-50 hover:opacity-70',
-              )}
-            >
-              <div className="flex flex-col gap-1">
-                <span
-                  className={cn(
-                    'text-sm font-bold tracking-widest',
-                    selectedMission?.id === mission.id ? 'text-cyan-400' : '',
-                  )}
-                >
-                  {mission.title}
-                </span>
-                <span className="text-[10px] font-mono text-[var(--color-ac-ui)]">
-                  REWARD: {mission.reward.toLocaleString()} COAM
-                </span>
-              </div>
-              <div className="text-xs font-mono tracking-widest">
-                {mission.status === 'AVAILABLE' ? (
-                  <span className="text-cyan-400 flex items-center gap-1">
-                    SELECT <ChevronRight size={14} />
-                  </span>
-                ) : (
-                  <span className="text-red-500">LOCKED</span>
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-6 overflow-hidden">
+        <div className="w-full md:w-1/2 min-h-0 overflow-y-auto flex flex-col gap-3 pr-2">
+          {missions.length === 0 ? (
+            <p className="text-xs text-[var(--color-ac-ui)]/70">暂无任务，请在变量中写入 `任务面板` 条目。</p>
+          ) : (
+            missions.map(mission => (
+              <div
+                key={mission.id}
+                onClick={() => setSelected(mission)}
+                className={cn(
+                  'border p-4 flex justify-between items-center transition-all cursor-pointer',
+                  selected?.id === mission.id
+                    ? 'border-cyan-400 bg-cyan-900/30'
+                    : 'border-[var(--color-ac-ui)]/50 bg-[var(--color-ac-ui)]/10 hover:bg-[var(--color-ac-ui)]/20',
                 )}
+              >
+                <div className="flex flex-col gap-1 min-w-0">
+                  <span
+                    className={cn(
+                      'text-sm font-bold tracking-widest truncate',
+                      selected?.id === mission.id ? 'text-cyan-400' : '',
+                    )}
+                  >
+                    {mission.title}
+                  </span>
+                  <span className="text-[10px] font-mono text-[var(--color-ac-ui)] truncate">
+                    奖励: {mission.reward}
+                  </span>
+                </div>
+                <ChevronRight
+                  size={14}
+                  className={cn(
+                    'shrink-0 text-cyan-500',
+                    selected?.id === mission.id ? 'opacity-100' : 'opacity-40',
+                  )}
+                />
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
-        {/* Mission Details Preview */}
-        <div className="w-full md:w-1/2 flex flex-col bg-[var(--color-ac-ui)]/5 border border-[var(--color-ac-ui)]/20 p-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-[var(--color-ac-ui)]/5 rounded-full blur-3xl" />
+        <div className="w-full md:w-1/2 min-h-0 flex flex-col bg-[var(--color-ac-ui)]/5 border border-[var(--color-ac-ui)]/20 p-6 relative overflow-y-auto">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-[var(--color-ac-ui)]/5 rounded-full blur-3xl pointer-events-none" />
 
-          {selectedMission ? (
+          {selected ? (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              key={selectedMission.id}
-              className="flex flex-col h-full z-10"
+              key={selected.id}
+              className="flex flex-col z-10"
             >
               <div className="flex items-center gap-2 mb-4">
-                <Crosshair
-                  className={selectedMission.status === 'AVAILABLE' ? 'text-cyan-400' : 'text-red-500'}
-                  size={24}
-                />
-                <h3 className="text-xl font-bold tracking-widest">{selectedMission.title}</h3>
+                <Crosshair className="text-cyan-400" size={24} />
+                <h3 className="text-xl font-bold tracking-widest">{selected.title}</h3>
               </div>
 
-              <div className="flex flex-col gap-4 mb-6">
+              <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] text-[var(--color-ac-ui)] tracking-widest">OBJECTIVE</span>
-                  <p className="text-sm leading-relaxed">
-                    {selectedMission.id === 'm1' &&
-                      '摧毁行星封锁机构的武装开采舰。目标体积庞大，建议装备高爆发火力的武器。'}
-                    {selectedMission.id === 'm2' && '突破卢比孔解放战线的防线，越过高墙。注意规避敌方重型火炮的攻击。'}
-                    {selectedMission.id === 'm3' &&
-                      '袭击位于旧宇宙港的监视点。情报显示有强力独立佣兵驻守，请做好苦战准备。'}
-                  </p>
+                  <span className="text-[10px] text-[var(--color-ac-ui)] tracking-widest">任务目标</span>
+                  <p className="text-sm leading-relaxed">{selected.objective}</p>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1 bg-black/40 p-3 border-l-2 border-[var(--color-ac-ui)]/50">
-                    <span className="text-[10px] text-[var(--color-ac-ui)] tracking-widest">BASE REWARD</span>
-                    <span className="font-mono text-cyan-400">{selectedMission.reward.toLocaleString()} COAM</span>
-                  </div>
-                  <div className="flex flex-col gap-1 bg-black/40 p-3 border-l-2 border-[var(--color-ac-ui)]/50">
-                    <span className="text-[10px] text-[var(--color-ac-ui)] tracking-widest">DIFFICULTY</span>
-                    <span className="font-mono text-yellow-500">
-                      {selectedMission.id === 'm1' && '★★☆☆☆'}
-                      {selectedMission.id === 'm2' && '★★★☆☆'}
-                      {selectedMission.id === 'm3' && '★★★★☆'}
-                    </span>
-                  </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] text-[var(--color-ac-ui)] tracking-widest">任务进度</span>
+                  <p className="text-sm leading-relaxed">{selected.progress}</p>
                 </div>
-              </div>
-
-              <div className="mt-auto">
-                <button
-                  disabled={selectedMission.status !== 'AVAILABLE'}
-                  className="w-full py-3 bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-text)] hover:bg-cyan-500 hover:text-black hover:border-cyan-500 transition-all font-bold tracking-widest disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-[var(--color-ac-ui)]/20 disabled:hover:text-[var(--color-ac-text)] disabled:hover:border-[var(--color-ac-ui)]/50"
-                >
-                  {selectedMission.status === 'AVAILABLE' ? 'ACCEPT MISSION' : 'MISSION LOCKED'}
-                </button>
+                <div className="flex flex-col gap-1 bg-black/40 p-3 border-l-2 border-cyan-500/50">
+                  <span className="text-[10px] text-[var(--color-ac-ui)] tracking-widest">任务奖励</span>
+                  <span className="font-mono text-cyan-400 text-sm">{selected.reward}</span>
+                </div>
               </div>
             </motion.div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center opacity-30 text-[var(--color-ac-ui)]">
+            <div className="flex-1 flex flex-col items-center justify-center opacity-30 text-[var(--color-ac-ui)] min-h-[12rem]">
               <Crosshair size={48} className="mb-4" />
-              <p className="text-sm font-mono tracking-widest">AWAITING MISSION SELECTION</p>
+              <p className="text-sm font-mono tracking-widest text-center px-4">选择左侧任务查看详情</p>
             </div>
           )}
         </div>
@@ -531,7 +511,7 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   const [models, setModels] = useState<string[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const [apiSettings, setApiSettings] = useState({
     url: 'https://api.openai.com/v1',
@@ -557,8 +537,12 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+    const el = chatScrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [messages, isLoading, showSettings]);
 
   const saveSettings = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -665,7 +649,7 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className="flex flex-col h-full relative"
+      className="flex flex-col flex-1 min-h-0 h-full overflow-hidden relative"
     >
       <div className="flex items-end justify-between ac-border-b pb-2 mb-4 shrink-0">
         <div>
@@ -683,7 +667,7 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
       </div>
 
       {showSettings ? (
-        <div className="flex-1 overflow-y-auto pr-2">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2 overscroll-contain">
           <form onSubmit={saveSettings} className="flex flex-col gap-4 max-w-md mx-auto mt-4">
             <h3 className="text-lg font-bold text-cyan-400 mb-2">API 配置</h3>
 
@@ -767,7 +751,10 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
         </div>
       ) : (
         <>
-          <div className="flex-1 overflow-y-auto flex flex-col gap-4 pr-2 mb-4">
+          <div
+            ref={chatScrollRef}
+            className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-4 pr-2 mb-4"
+          >
             {messages.length === 0 && (
               <div className="m-auto text-center text-[var(--color-ac-ui)] opacity-50 flex flex-col items-center gap-2">
                 <Cpu size={32} />
@@ -807,10 +794,9 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
-          <div className="shrink-0 flex gap-2">
+          <div className="shrink-0 flex gap-2 pt-1 border-t border-[var(--color-ac-ui)]/10">
             <input
               type="text"
               value={input}
@@ -846,7 +832,7 @@ export default function App() {
   const [bgUrl, setBgUrl] = useState('');
   const [showBgSettings, setShowBgSettings] = useState(false);
   const [chatInput, setChatInput] = useState('');
-  const { display } = useStatData();
+  const { display, statData } = useStatData();
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -868,6 +854,8 @@ export default function App() {
     setChatInput(`将${partName}装备到${mechName}上`);
     setActiveTab('ALLMIND');
   };
+
+  const currentMechName = display.mechName;
 
   const tabs: { id: Tab; label: string; icon: ReactNode; en: string }[] = [
     { id: 'STATUS', label: '状态总览', icon: <Activity size={18} />, en: 'STATUS' },
@@ -920,7 +908,7 @@ export default function App() {
       </div>
 
       {/* Main Layout */}
-      <div className="relative z-10 flex flex-col md:flex-row w-full h-full pt-12 pb-4 md:pb-8 px-4 md:px-8 gap-4 md:gap-8">
+      <div className="relative z-10 flex flex-col md:flex-row w-full h-full min-h-0 pt-12 pb-4 md:pb-8 px-4 md:px-8 gap-4 md:gap-8">
         {/* Left Sidebar (Navigation) */}
         <div
           className={cn(
@@ -1010,7 +998,7 @@ export default function App() {
         {/* Main Content Area */}
         <div
           className={cn(
-            'flex-1 relative w-full max-w-3xl transition-all duration-300',
+            'flex-1 relative w-full max-w-3xl min-h-0 transition-all duration-300',
             activeTab === null ? 'hidden' : 'flex flex-col',
           )}
         >
@@ -1023,20 +1011,29 @@ export default function App() {
             RETURN TO MENU
           </button>
 
-          <div className="relative w-full h-full bg-[var(--color-ac-panel)] backdrop-blur-md border border-[var(--color-ac-ui)]/20 p-4 md:p-8 shadow-2xl flex-1 overflow-hidden">
+          <div className="relative w-full h-full min-h-0 bg-[var(--color-ac-panel)] backdrop-blur-md border border-[var(--color-ac-ui)]/20 p-4 md:p-8 shadow-2xl flex-1 flex flex-col overflow-hidden">
             {/* Decorative corner brackets */}
             <div className="absolute -top-1 -left-1 w-3 h-3 border-t border-l border-[var(--color-ac-ui)]" />
             <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b border-l border-[var(--color-ac-ui)]" />
             <div className="absolute -top-1 -right-1 w-3 h-3 border-t border-r border-[var(--color-ac-ui)] opacity-30" />
             <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b border-r border-[var(--color-ac-ui)] opacity-30" />
 
-            <AnimatePresence mode="wait">
-              {activeTab === 'STATUS' && <StatusView key="STATUS" display={display} />}
-              {activeTab === 'GARAGE' && <GarageView key="GARAGE" onEquip={handleEquip} />}
-              {activeTab === 'ROMANCE' && <RomanceView key="ROMANCE" />}
-              {activeTab === 'MISSIONS' && <MissionView key="MISSIONS" />}
-              {activeTab === 'ALLMIND' && <AllmindView key="ALLMIND" input={chatInput} setInput={setChatInput} />}
-            </AnimatePresence>
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <AnimatePresence mode="wait">
+                {activeTab === 'STATUS' && <StatusView key="STATUS" display={display} />}
+                {activeTab === 'GARAGE' && (
+                  <GarageView
+                    key="GARAGE"
+                    statData={statData}
+                    currentMechName={currentMechName}
+                    onEquip={handleEquip}
+                  />
+                )}
+                {activeTab === 'ROMANCE' && <RomanceView key="ROMANCE" statData={statData} />}
+                {activeTab === 'MISSIONS' && <MissionView key="MISSIONS" statData={statData} />}
+                {activeTab === 'ALLMIND' && <AllmindView key="ALLMIND" input={chatInput} setInput={setChatInput} />}
+              </AnimatePresence>
+            </div>
 
             {/* Close Button (Desktop) */}
             <button
