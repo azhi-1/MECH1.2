@@ -17,7 +17,7 @@ import {
   Zap
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { twMerge } from 'tailwind-merge';
 
 // Utility for merging tailwind classes
@@ -268,7 +268,7 @@ const StatusView = () => (
   </motion.div>
 );
 
-const GarageView = ({ onEquip }: { key?: string; onEquip: (partName: string, mechName: string) => void }) => {
+const GarageView = ({ onEquip }: { onEquip: (partName: string, mechName: string) => void }) => {
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -550,7 +550,7 @@ const MissionView = () => {
   );
 };
 
-const AllmindView = ({ input, setInput }: { key?: string; input: string; setInput: (v: string) => void }) => {
+const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string) => void }) => {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -573,14 +573,20 @@ const AllmindView = ({ input, setInput }: { key?: string; input: string; setInpu
 
   useEffect(() => {
     const saved = localStorage.getItem('allmind_api_settings');
-    if (saved) setApiSettings(JSON.parse(saved));
+    if (!saved) return;
+    try {
+      const parsed = JSON.parse(saved) as Partial<typeof apiSettings>;
+      setApiSettings(prev => ({ ...prev, ...parsed }));
+    } catch {
+      console.warn('allmind_api_settings in localStorage is invalid, ignored');
+    }
   }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isLoading]);
 
-  const saveSettings = (e: React.FormEvent) => {
+  const saveSettings = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     localStorage.setItem('allmind_api_settings', JSON.stringify(apiSettings));
     setShowSettings(false);
@@ -598,8 +604,8 @@ const AllmindView = ({ input, setInput }: { key?: string; input: string; setInpu
       } else {
         setTestResult(`连接失败: ${res.status}`);
       }
-    } catch (err: any) {
-      setTestResult(`错误: ${err.message}`);
+    } catch (err: unknown) {
+      setTestResult(`错误: ${err instanceof Error ? err.message : String(err)}`);
     }
     setIsTesting(false);
   };
@@ -609,12 +615,16 @@ const AllmindView = ({ input, setInput }: { key?: string; input: string; setInpu
       const res = await fetch(`${apiSettings.url}/models`, {
         headers: { Authorization: `Bearer ${apiSettings.key}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.data) {
-          setModels(data.data.map((m: any) => m.id));
-        }
-      }
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        data?: { id?: string }[];
+        models?: { name?: string; model?: string }[];
+      };
+      const openaiStyle = data.data?.map(m => m.id).filter(Boolean) as string[];
+      const ollamaStyle =
+        data.models?.map(m => m.name ?? m.model).filter((x): x is string => Boolean(x)) ?? [];
+      const ids = openaiStyle.length > 0 ? openaiStyle : ollamaStyle;
+      if (ids.length > 0) setModels(ids);
     } catch (err) {
       console.error('Failed to fetch models', err);
     }
@@ -647,14 +657,30 @@ const AllmindView = ({ input, setInput }: { key?: string; input: string; setInpu
         }),
       });
 
-      const data = await response.json();
-      if (data.choices && data.choices[0]) {
-        setMessages([...newMessages, data.choices[0].message]);
-      } else {
-        throw new Error(data.error?.message || 'Unknown API Error');
+      const raw = await response.text();
+      let data: {
+        choices?: { message?: { role?: string; content?: string } }[];
+        error?: { message?: string };
+      };
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error(raw.slice(0, 200) || '响应不是合法 JSON');
       }
-    } catch (error: any) {
-      setMessages([...newMessages, { role: 'assistant', content: `[SYSTEM ERROR] ${error.message}` }]);
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || `HTTP ${response.status}`);
+      }
+
+      const msg = data.choices?.[0]?.message;
+      if (msg && typeof msg.content === 'string') {
+        setMessages([...newMessages, { role: msg.role ?? 'assistant', content: msg.content }]);
+      } else {
+        throw new Error(data.error?.message || '响应中缺少 choices');
+      }
+    } catch (error: unknown) {
+      const text = error instanceof Error ? error.message : String(error);
+      setMessages([...newMessages, { role: 'assistant', content: `[SYSTEM ERROR] ${text}` }]);
     } finally {
       setIsLoading(false);
     }
@@ -815,7 +841,12 @@ const AllmindView = ({ input, setInput }: { key?: string; input: string; setInpu
               type="text"
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              onKeyDown={e => {
+                if (e.key !== 'Enter' || e.shiftKey) return;
+                if (e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                void handleSend();
+              }}
               placeholder="输入指令..."
               className="flex-1 bg-black/50 border border-[var(--color-ac-ui)]/30 p-3 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)] placeholder-[var(--color-ac-ui)]/50"
             />
@@ -849,7 +880,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleBgSave = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleBgSave = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const url = formData.get('bgUrl') as string;
@@ -863,7 +894,7 @@ export default function App() {
     setActiveTab('ALLMIND');
   };
 
-  const tabs: { id: Tab; label: string; icon: React.ReactNode; en: string }[] = [
+  const tabs: { id: Tab; label: string; icon: ReactNode; en: string }[] = [
     { id: 'STATUS', label: '状态总览', icon: <Activity size={18} />, en: 'STATUS' },
     { id: 'GARAGE', label: '机库整备', icon: <Wrench size={18} />, en: 'GARAGE' },
     { id: 'ROMANCE', label: '通讯频道', icon: <Heart size={18} />, en: 'COMPANIONS' },
