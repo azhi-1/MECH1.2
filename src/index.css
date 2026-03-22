@@ -13,13 +13,29 @@
 }
 
 @layer base {
+  /* Embed-friendly: ST message bubbles size to content; give html/body/#root a real height floor. */
+  html {
+    width: 100%;
+    max-width: 100%;
+    min-height: clamp(22rem, 85dvh, 1200px);
+  }
+
   body {
     background-color: var(--color-ac-bg);
     color: var(--color-ac-text);
     font-family: var(--font-sans);
     overflow: hidden;
+    width: 100%;
+    max-width: 100%;
+    min-height: clamp(22rem, 85dvh, 1200px);
     /* Prevent text selection for a more app-like feel */
     user-select: none;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-height: clamp(22rem, 85dvh, 1200px);
   }
 }
 
