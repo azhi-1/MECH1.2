@@ -751,7 +751,7 @@ const MissionView = ({ statData }: { statData: StatData | undefined }) => {
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-6 overflow-hidden">
-        <div className="w-full md:w-1/2 min-h-0 overflow-y-auto flex flex-col gap-3 pr-2">
+        <div className="w-full md:w-1/2 flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 pr-2">
           {missions.length === 0 ? (
             <p className="text-xs text-[var(--color-ac-ui)]/70">暂无任务，请在变量中写入 `任务面板` 条目。</p>
           ) : (
@@ -791,7 +791,7 @@ const MissionView = ({ statData }: { statData: StatData | undefined }) => {
           )}
         </div>
 
-        <div className="w-full md:w-1/2 min-h-0 flex flex-col bg-[var(--color-ac-ui)]/5 border border-[var(--color-ac-ui)]/20 p-6 relative overflow-y-auto">
+        <div className="w-full md:w-1/2 flex-1 min-h-0 flex flex-col bg-[var(--color-ac-ui)]/5 border border-[var(--color-ac-ui)]/20 p-6 relative overflow-y-auto">
           <div className="absolute top-0 right-0 w-32 h-32 bg-[var(--color-ac-ui)]/5 rounded-full blur-3xl pointer-events-none" />
 
           {selected ? (
@@ -799,7 +799,7 @@ const MissionView = ({ statData }: { statData: StatData | undefined }) => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               key={selected.id}
-              className="flex flex-col z-10"
+              className="flex flex-col z-10 flex-1"
             >
               <div className="flex items-center gap-2 mb-4">
                 <Crosshair className="text-cyan-400" size={24} />
@@ -837,23 +837,25 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAiMenu, setShowAiMenu] = useState(false);
   const [showPromptManager, setShowPromptManager] = useState(false);
   const [useTavernContext, setUseTavernContext] = useState(true);
   const [contextFloors, setContextFloors] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('allmind_context_floors');
-      const n = saved ? Number(saved) : 6;
-      if (!Number.isFinite(n)) return 6;
+      const n = saved ? Number(saved) : 10;
+      if (!Number.isFinite(n)) return 10;
       const floored = Math.floor(n);
       return Math.min(20, Math.max(0, floored));
     } catch {
-      return 6;
+      return 10;
     }
   });
   const [models, setModels] = useState<string[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const aiMenuRef = useRef<HTMLDivElement>(null);
   const [promptStore, setPromptStore] = useState<PromptPresetStoreV2>(() => loadPromptPresetStore());
 
   const activePresetSlot = useMemo(() => getActivePresetSlot(promptStore), [promptStore]);
@@ -887,6 +889,24 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   }, [promptStore]);
 
   useEffect(() => {
+    if (!showAiMenu) return;
+    const onDoc = (e: MouseEvent) => {
+      if (aiMenuRef.current && !aiMenuRef.current.contains(e.target as Node)) setShowAiMenu(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showAiMenu]);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [showSettings]);
+
+  useEffect(() => {
     try {
       localStorage.setItem('allmind_context_floors', String(contextFloors));
     } catch {
@@ -900,7 +920,7 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, [messages, isLoading, showSettings]);
+  }, [messages, isLoading]);
 
   const saveSettings = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1024,210 +1044,264 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
             AI Integration // Override
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-2">
-            <button
-              type="button"
-              onClick={() => setShowPromptManager(true)}
-              className="text-[10px] px-3 py-2 sm:px-2 sm:py-1 border border-cyan-500/50 bg-cyan-900/30 text-cyan-300 hover:bg-cyan-700/40 transition-colors tracking-widest"
-            >
-              提示词预设
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowSettings(!showSettings)}
-              className="text-[10px] px-3 py-2 sm:px-2 sm:py-1 border border-[var(--color-ac-ui)]/50 bg-[var(--color-ac-ui)]/20 text-[var(--color-ac-text)] hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors tracking-widest"
-            >
-              API 配置
-            </button>
             <span className="text-[10px] text-[var(--color-ac-ui)]/80 font-mono max-w-full truncate hidden sm:inline">
               预设: {activePresetSlot.name} / 启用 {promptBlocks.filter(b => b.enabled).length}
             </span>
-            <label className="flex items-center gap-1.5 text-[10px] text-[var(--color-ac-ui)] font-mono cursor-pointer select-none min-h-[44px] sm:min-h-0 py-1">
-              <input
-                type="checkbox"
-                checked={useTavernContext}
-                onChange={e => setUseTavernContext(e.target.checked)}
-                className="accent-cyan-500 size-4 shrink-0"
-              />
-              读取正文
-            </label>
 
-            <div className={cn('w-full', !useTavernContext && 'opacity-60')}>
-              <div className="flex items-center justify-between text-[10px] font-mono text-[var(--color-ac-ui)] px-1 mb-1">
-                <span>读取上下文条数</span>
-                <span className="text-[var(--color-ac-text)]">{contextFloors} 条</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={20}
-                step={1}
-                value={contextFloors}
-                onChange={e => setContextFloors(Number(e.target.value))}
-                disabled={!useTavernContext}
-                aria-label="读取上下文条数"
-                className="ac-context-range"
-              />
+            <div className="relative shrink-0" ref={aiMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowAiMenu(v => !v)}
+                aria-label="AI 设置选项"
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 border rounded-sm transition-colors',
+                  'text-[10px] border-[var(--color-ac-ui)]/50 bg-[var(--color-ac-ui)]/10 text-[var(--color-ac-text)]',
+                  showAiMenu
+                    ? 'border-cyan-400/70 bg-cyan-900/20 text-cyan-200'
+                    : 'hover:border-cyan-500/60 hover:bg-cyan-900/10 hover:text-cyan-300',
+                )}
+              >
+                <Settings size={14} />
+                <span className="font-mono tracking-widest">AI 设置</span>
+              </button>
+
+              {showAiMenu && (
+                <div className="absolute right-0 top-full mt-2 z-[250] w-[16rem] bg-black/95 border border-[var(--color-ac-ui)]/40 backdrop-blur-sm rounded-sm p-3 text-xs">
+                  <label className="flex items-center gap-2 text-[var(--color-ac-ui)] font-mono cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={useTavernContext}
+                      onChange={e => setUseTavernContext(e.target.checked)}
+                      className="accent-cyan-500"
+                    />
+                    读取正文
+                  </label>
+
+                  <div className={cn('mt-2', !useTavernContext && 'opacity-60')}>
+                    <div className="flex items-center justify-between text-[10px] font-mono text-[var(--color-ac-ui)] px-1 mb-1">
+                      <span>读取上下文条数</span>
+                      <span className="text-[var(--color-ac-text)]">{contextFloors} 条</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={20}
+                      step={1}
+                      value={contextFloors}
+                      onChange={e => setContextFloors(Number(e.target.value))}
+                      disabled={!useTavernContext}
+                      aria-label="读取上下文条数"
+                      className="ac-context-range"
+                    />
+                  </div>
+
+                  <div className="border-t border-[var(--color-ac-ui)]/20 my-3" />
+
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAiMenu(false);
+                        setShowSettings(true);
+                      }}
+                      className="w-full px-3 py-2 text-[var(--color-ac-text)] bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/30 hover:bg-[var(--color-ac-ui)]/30 transition-colors font-bold tracking-widest"
+                    >
+                      API 配置
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAiMenu(false);
+                        setShowPromptManager(true);
+                      }}
+                      className="w-full px-3 py-2 text-[var(--color-ac-text)] bg-[var(--color-ac-ui)]/10 border border-[var(--color-ac-ui)]/30 hover:bg-[var(--color-ac-ui)]/20 transition-colors font-bold tracking-widest"
+                    >
+                      提示词预设
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {showSettings ? (
-        <div className="flex-1 min-h-0 overflow-y-auto pr-2 overscroll-contain">
-          <form onSubmit={saveSettings} className="flex flex-col gap-4 max-w-md mx-auto mt-4">
-            <h3 className="text-lg font-bold text-cyan-400 mb-2">API 配置</h3>
-
-            <div className="flex gap-2">
-              {PRESETS.map(p => (
-                <button
-                  key={p.name}
-                  type="button"
-                  onClick={() => setApiSettings({ ...apiSettings, url: p.url, model: p.model })}
-                  className="text-xs px-2 py-1 border border-[var(--color-ac-ui)]/30 hover:bg-[var(--color-ac-ui)]/20"
-                >
-                  {p.name}
-                </button>
-              ))}
+      <>
+        <div
+          ref={chatScrollRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-4 pr-2"
+        >
+          {messages.length === 0 && (
+            <div className="m-auto text-center text-[var(--color-ac-ui)] opacity-50 flex flex-col items-center gap-2">
+              <Cpu size={32} />
+              <p className="text-sm">ALLMIND 已上线。有什么可以帮您的，Operator？</p>
             </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-[var(--color-ac-ui)]">Base URL</label>
-              <input
-                type="text"
-                value={apiSettings.url}
-                onChange={e => setApiSettings({ ...apiSettings, url: e.target.value })}
-                className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-[var(--color-ac-ui)]">API Key</label>
-              <input
-                type="password"
-                value={apiSettings.key}
-                onChange={e => setApiSettings({ ...apiSettings, key: e.target.value })}
-                className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-[var(--color-ac-ui)] flex justify-between">
-                <span>Model</span>
-                <button type="button" onClick={fetchModels} className="text-cyan-400 hover:underline">
-                  拉取模型列表
-                </button>
-              </label>
-              {models.length > 0 ? (
-                <select
-                  value={apiSettings.model}
-                  onChange={e => setApiSettings({ ...apiSettings, model: e.target.value })}
-                  className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
-                >
-                  {models.map(m => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type="text"
-                  value={apiSettings.model}
-                  onChange={e => setApiSettings({ ...apiSettings, model: e.target.value })}
-                  className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
-                />
+          )}
+          {messages.map((msg, idx) => (
+            <div
+              key={idx}
+              className={cn(
+                'flex flex-col max-w-[85%]',
+                msg.role === 'user' ? 'self-end items-end' : 'self-start items-start',
               )}
-            </div>
-
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={testConnection}
-                className="flex-1 bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-text)] py-2 hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors font-bold tracking-widest text-sm"
-              >
-                {isTesting ? '测试中...' : '测试连接'}
-              </button>
-              <button
-                type="submit"
-                className="flex-1 bg-cyan-900/30 border border-cyan-500/50 text-cyan-400 py-2 hover:bg-cyan-500 hover:text-black transition-colors font-bold tracking-widest text-sm"
-              >
-                保存配置
-              </button>
-            </div>
-            {testResult && <div className="text-xs text-center text-cyan-400">{testResult}</div>}
-          </form>
-        </div>
-      ) : (
-        <>
-          <div
-            ref={chatScrollRef}
-            className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-4 pr-2 mb-4"
-          >
-            {messages.length === 0 && (
-              <div className="m-auto text-center text-[var(--color-ac-ui)] opacity-50 flex flex-col items-center gap-2">
-                <Cpu size={32} />
-                <p className="text-sm">ALLMIND 已上线。有什么可以帮您的，Operator？</p>
-              </div>
-            )}
-            {messages.map((msg, idx) => (
+            >
+              <span className="text-[10px] font-mono text-[var(--color-ac-ui)] mb-1">
+                {msg.role === 'user' ? 'OPERATOR' : 'ALLMIND'}
+              </span>
               <div
-                key={idx}
                 className={cn(
-                  'flex flex-col max-w-[85%]',
-                  msg.role === 'user' ? 'self-end items-end' : 'self-start items-start',
+                  'p-3 text-sm leading-relaxed',
+                  msg.role === 'user'
+                    ? 'bg-[var(--color-ac-ui)]/20 border-r-2 border-[var(--color-ac-text)]'
+                    : 'bg-cyan-900/20 border-l-2 border-cyan-500 text-cyan-50',
                 )}
               >
-                <span className="text-[10px] font-mono text-[var(--color-ac-ui)] mb-1">
-                  {msg.role === 'user' ? 'OPERATOR' : 'ALLMIND'}
-                </span>
-                <div
-                  className={cn(
-                    'p-3 text-sm leading-relaxed',
-                    msg.role === 'user'
-                      ? 'bg-[var(--color-ac-ui)]/20 border-r-2 border-[var(--color-ac-text)]'
-                      : 'bg-cyan-900/20 border-l-2 border-cyan-500 text-cyan-50',
-                  )}
-                >
-                  {msg.content}
-                </div>
+                {msg.content}
               </div>
-            ))}
-            {isLoading && (
-              <div className="self-start flex flex-col max-w-[85%]">
-                <span className="text-[10px] font-mono text-[var(--color-ac-ui)] mb-1">ALLMIND</span>
-                <div className="p-3 text-sm bg-cyan-900/20 border-l-2 border-cyan-500 text-cyan-50 flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce" />
-                  <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce delay-75" />
-                  <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce delay-150" />
-                </div>
+            </div>
+          ))}
+          {isLoading && (
+            <div className="self-start flex flex-col max-w-[85%]">
+              <span className="text-[10px] font-mono text-[var(--color-ac-ui)] mb-1">ALLMIND</span>
+              <div className="p-3 text-sm bg-cyan-900/20 border-l-2 border-cyan-500 text-cyan-50 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce" />
+                <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce delay-75" />
+                <span className="w-1.5 h-1.5 bg-cyan-500 rounded-full animate-bounce delay-150" />
               </div>
-            )}
-          </div>
+            </div>
+          )}
+        </div>
 
-          <div className="shrink-0 flex gap-2 pt-1 border-t border-[var(--color-ac-ui)]/10">
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key !== 'Enter' || e.shiftKey) return;
-                if (e.nativeEvent.isComposing) return;
-                e.preventDefault();
-                void handleSend();
-              }}
-              placeholder="输入指令..."
-              className="flex-1 bg-black/50 border border-[var(--color-ac-ui)]/30 p-3 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)] placeholder-[var(--color-ac-ui)]/50"
-            />
-            <button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              className="px-4 bg-cyan-900/30 border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-            >
-              <Send size={18} />
-            </button>
-          </div>
-        </>
-      )}
+        <div className="shrink-0 flex gap-2 pt-1 border-t border-[var(--color-ac-ui)]/10">
+          <input
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key !== 'Enter' || e.shiftKey) return;
+              if (e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              void handleSend();
+            }}
+            placeholder="输入指令..."
+            className="flex-1 bg-black/50 border border-[var(--color-ac-ui)]/30 p-3 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)] placeholder-[var(--color-ac-ui)]/50"
+          />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={isLoading || !input.trim()}
+            className="px-4 bg-cyan-900/30 border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+          >
+            <Send size={18} />
+          </button>
+        </div>
+      </>
 
       <AnimatePresence>
+        {showSettings && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[220] bg-black/75 backdrop-blur-sm flex items-center justify-center ac-p-safe-modal overflow-y-auto min-h-0 p-4"
+          >
+            <div className="w-full max-w-md bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-5 sm:p-6 max-h-[90vh] overflow-y-auto relative">
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
+                className="absolute top-3 right-3 min-h-[44px] min-w-[44px] flex items-center justify-center text-[var(--color-ac-ui)] hover:text-white"
+                aria-label="关闭 API 配置"
+              >
+                <X size={18} />
+              </button>
+
+              <form onSubmit={saveSettings} className="flex flex-col gap-4">
+                <h3 className="text-lg font-bold text-cyan-400 mb-2">API 配置</h3>
+
+                <div className="flex gap-2">
+                  {PRESETS.map(p => (
+                    <button
+                      key={p.name}
+                      type="button"
+                      onClick={() => setApiSettings({ ...apiSettings, url: p.url, model: p.model })}
+                      className="text-xs px-2 py-1 border border-[var(--color-ac-ui)]/30 hover:bg-[var(--color-ac-ui)]/20"
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-[var(--color-ac-ui)]">Base URL</label>
+                  <input
+                    type="text"
+                    value={apiSettings.url}
+                    onChange={e => setApiSettings({ ...apiSettings, url: e.target.value })}
+                    className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-[var(--color-ac-ui)]">API Key</label>
+                  <input
+                    type="password"
+                    value={apiSettings.key}
+                    onChange={e => setApiSettings({ ...apiSettings, key: e.target.value })}
+                    className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-[var(--color-ac-ui)] flex justify-between">
+                    <span>Model</span>
+                    <button type="button" onClick={fetchModels} className="text-cyan-400 hover:underline">
+                      拉取模型列表
+                    </button>
+                  </label>
+                  {models.length > 0 ? (
+                    <select
+                      value={apiSettings.model}
+                      onChange={e => setApiSettings({ ...apiSettings, model: e.target.value })}
+                      className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+                    >
+                      {models.map(m => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={apiSettings.model}
+                      onChange={e => setApiSettings({ ...apiSettings, model: e.target.value })}
+                      className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+                    />
+                  )}
+                </div>
+
+                <div className="flex gap-2 mt-4">
+                  <button
+                    type="button"
+                    onClick={testConnection}
+                    className="flex-1 bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-text)] py-2 hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors font-bold tracking-widest text-sm"
+                  >
+                    {isTesting ? '测试中...' : '测试连接'}
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 bg-cyan-900/30 border border-cyan-500/50 text-cyan-400 py-2 hover:bg-cyan-500 hover:text-black transition-colors font-bold tracking-widest text-sm"
+                  >
+                    保存配置
+                  </button>
+                </div>
+                {testResult && <div className="text-xs text-center text-cyan-400">{testResult}</div>}
+              </form>
+            </div>
+          </motion.div>
+        )}
+
         {showPromptManager && (
           <PromptPresetManagerModal
             store={promptStore}
@@ -1824,7 +1898,8 @@ const PromptBlockEditorModal = ({
 
 export default function App() {
   // 默认打开状态总览：activeTab 为 null 时右侧主面板整段 `hidden`，在 ST 里会像「只有灰底没有 UI」
-  const [activeTab, setActiveTab] = useState<Tab>('STATUS');
+  // 默认全收纳：不开子界面，仅保留左侧菜单 HUD
+  const [activeTab, setActiveTab] = useState<Tab>(null);
   // 防抖：避免连续点击 tab 触发 activeTab 在 null/非 null 间反复切换导致布局大幅抖动
   const [tabLocked, setTabLocked] = useState(false);
   const tabLockTimerRef = useRef<number | null>(null);
@@ -1884,8 +1959,8 @@ export default function App() {
     setTabLocked(true);
     if (tabLockTimerRef.current) window.clearTimeout(tabLockTimerRef.current);
     tabLockTimerRef.current = window.setTimeout(() => setTabLocked(false), 350);
-    // 点击同一个 tab：不再切到 null（从根上消除连续点击引发的左右位移）
-    setActiveTab(prev => (prev === id ? prev : id));
+    // 点击当前 tab：收纳；否则打开对应子界面
+    setActiveTab(prev => (prev === id ? null : id));
   };
 
   const shellDim = 'clamp(36rem, 100dvh, 2200px)';
