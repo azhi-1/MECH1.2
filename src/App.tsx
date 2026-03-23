@@ -27,6 +27,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { twMerge } from 'tailwind-merge';
 import type { StatData, StatusDisplay } from './statDataTypes';
+import { rtGetChatMessages, rtGetLastMessageId } from './tavernRuntime';
 import { useStatData } from './useStatData';
 import {
   garageFromStat,
@@ -109,6 +110,25 @@ function buildAllmindSystemPrompt(blocks: PromptBlock[]): string {
     )
     .join('\n\n');
   return `${ALLMIND_SYSTEM_PROMPT}\n\n【扩展提示词预设】\n${segments}`;
+}
+
+function readTavernContextSnippet(limit = 6): string {
+  const getLast = rtGetLastMessageId();
+  const getMsgs = rtGetChatMessages();
+  if (!getLast || !getMsgs) return '';
+  try {
+    const lastId = getLast();
+    if (lastId < 0) return '';
+    const msgs = getMsgs(`0-${lastId}`);
+    if (!Array.isArray(msgs) || msgs.length === 0) return '';
+    const snippet = msgs
+      .slice(-limit)
+      .map(m => `[${(m.role || 'unknown').toUpperCase()} #${m.message_id}] ${m.message || ''}`)
+      .join('\n');
+    return snippet.trim();
+  } catch {
+    return '';
+  }
 }
 
 const ALLMIND_SYSTEM_PROMPT = `
@@ -627,6 +647,7 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   const [isLoading, setIsLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPromptManager, setShowPromptManager] = useState(false);
+  const [useTavernContext, setUseTavernContext] = useState(true);
   const [models, setModels] = useState<string[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -736,7 +757,11 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
     setIsLoading(true);
 
     try {
-      const finalSystemPrompt = buildAllmindSystemPrompt(promptBlocks);
+      const presetPrompt = buildAllmindSystemPrompt(promptBlocks);
+      const ctx = useTavernContext ? readTavernContextSnippet(6) : '';
+      const finalSystemPrompt = ctx
+        ? `${presetPrompt}\n\n【当前酒馆正文上下文（最近6条）】\n${ctx}`
+        : presetPrompt;
       const response = await fetch(`${apiSettings.url}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -810,6 +835,15 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
             <span className="text-[10px] text-[var(--color-ac-ui)]/80 font-mono">
               预设: {promptPresetName} / 启用 {promptBlocks.filter(b => b.enabled).length}
             </span>
+            <label className="ml-1 flex items-center gap-1 text-[10px] text-[var(--color-ac-ui)] font-mono cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={useTavernContext}
+                onChange={e => setUseTavernContext(e.target.checked)}
+                className="accent-cyan-500"
+              />
+              读取正文
+            </label>
           </div>
         </div>
       </div>
@@ -1000,6 +1034,7 @@ const PromptPresetManagerModal = ({
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const filteredBlocks = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1047,24 +1082,34 @@ const PromptPresetManagerModal = ({
 
   const exportPreset = () => {
     const payload: PromptPresetPack = { presetName, blocks };
-    try {
-      navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-      alert('已复制预设 JSON 到剪贴板');
-    } catch {
-      alert('复制失败，请检查浏览器权限');
-    }
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = `${(presetName || 'prompt-preset').trim().replace(/[\\/:*?"<>|]/g, '_')}.json`;
+    a.click();
+    URL.revokeObjectURL(href);
   };
 
-  const importPreset = () => {
-    const raw = window.prompt('粘贴预设 JSON');
-    if (!raw) return;
+  const importPresetFromFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = typeof reader.result === 'string' ? reader.result : '';
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw) as Partial<PromptPresetPack>;
+        if (!Array.isArray(parsed.blocks)) throw new Error('blocks 字段缺失');
+        onChangePresetName(parsed.presetName?.trim() || '导入预设');
+        onChangeBlocks(parsed.blocks);
+      } catch (e) {
+        alert(`导入失败: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
     try {
-      const parsed = JSON.parse(raw) as Partial<PromptPresetPack>;
-      if (!Array.isArray(parsed.blocks)) throw new Error('blocks 字段缺失');
-      onChangePresetName(parsed.presetName?.trim() || '导入预设');
-      onChangeBlocks(parsed.blocks);
+      reader.readAsText(file, 'utf-8');
     } catch (e) {
-      alert(`导入失败: ${e instanceof Error ? e.message : String(e)}`);
+      alert(`读取文件失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -1101,7 +1146,7 @@ const PromptPresetManagerModal = ({
           </button>
           <button
             type="button"
-            onClick={importPreset}
+            onClick={() => importInputRef.current?.click()}
             className="px-3 py-2 text-xs font-bold tracking-widest bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-text)] hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors"
           >
             导入
@@ -1113,6 +1158,17 @@ const PromptPresetManagerModal = ({
           >
             导出
           </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) importPresetFromFile(file);
+              e.currentTarget.value = '';
+            }}
+          />
         </div>
 
         <div className="shrink-0 flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-3">
