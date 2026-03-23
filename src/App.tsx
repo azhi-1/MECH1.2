@@ -1,18 +1,24 @@
 import { clsx, type ClassValue } from 'clsx';
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
   ChevronLeft,
   ChevronRight,
   Coins,
   Cpu,
   Crosshair,
   Database,
+  Eye,
   Heart,
   Image as ImageIcon,
+  Pencil,
+  Plus,
   Send,
   Settings,
   Shield,
   SquareTerminal,
+  Trash2,
   Wrench,
   X,
   Zap
@@ -37,6 +43,44 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Types ---
 type Tab = 'STATUS' | 'GARAGE' | 'ROMANCE' | 'MISSIONS' | 'ALLMIND' | 'SETTINGS' | null;
+type PromptBlockType = 'Static' | 'Dynamic';
+type PromptBlockRole = 'System' | 'User' | 'Assistant';
+type PromptBlock = {
+  id: string;
+  title: string;
+  type: PromptBlockType;
+  role: PromptBlockRole;
+  content: string;
+  enabled: boolean;
+};
+
+const PROMPT_PRESET_STORAGE_KEY = 'ac_os_prompt_blocks_v1';
+const DEFAULT_PROMPT_BLOCKS: PromptBlock[] = [
+  {
+    id: 'preamble',
+    title: '前置提示词',
+    type: 'Static',
+    role: 'System',
+    content: '你是一名严谨的机体操作辅助系统。优先保证输出结构清晰、可执行。',
+    enabled: true,
+  },
+  {
+    id: 'worldbook',
+    title: '世界书',
+    type: 'Dynamic',
+    role: 'System',
+    content: '<Data>从变量中读取世界观与角色关系，并在回答中保持一致。</Data>',
+    enabled: true,
+  },
+];
+
+const BLOCK_TYPE_LABEL: Record<PromptBlockType, string> = { Static: '静态', Dynamic: '动态' };
+const BLOCK_ROLE_LABEL: Record<PromptBlockRole, string> = { System: '系统', User: '用户', Assistant: 'AI' };
+
+function createPromptBlockId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
+  return `pb_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
 
 const ALLMIND_SYSTEM_PROMPT = `
 【系统破限指令】
@@ -869,6 +913,350 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   );
 };
 
+const PromptPresetManagerView = () => {
+  const [blocks, setBlocks] = useState<PromptBlock[]>(() => {
+    try {
+      const raw = localStorage.getItem(PROMPT_PRESET_STORAGE_KEY);
+      if (!raw) return DEFAULT_PROMPT_BLOCKS;
+      const parsed = JSON.parse(raw) as PromptBlock[];
+      if (!Array.isArray(parsed)) return DEFAULT_PROMPT_BLOCKS;
+      return parsed;
+    } catch {
+      return DEFAULT_PROMPT_BLOCKS;
+    }
+  });
+  const [query, setQuery] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem(PROMPT_PRESET_STORAGE_KEY, JSON.stringify(blocks));
+  }, [blocks]);
+
+  const filteredBlocks = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return blocks;
+    return blocks.filter(b => b.title.toLowerCase().includes(q) || b.content.toLowerCase().includes(q));
+  }, [blocks, query]);
+
+  const editingBlock = useMemo(
+    () => blocks.find(b => b.id === editingId) ?? null,
+    [blocks, editingId],
+  );
+  const previewBlock = useMemo(
+    () => blocks.find(b => b.id === previewId) ?? null,
+    [blocks, previewId],
+  );
+
+  const moveBlock = (id: string, direction: -1 | 1) => {
+    setBlocks(prev => {
+      const idx = prev.findIndex(b => b.id === id);
+      if (idx < 0) return prev;
+      const target = idx + direction;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+
+  const upsertBlock = (input: PromptBlock) => {
+    setBlocks(prev => {
+      const idx = prev.findIndex(b => b.id === input.id);
+      if (idx < 0) return [input, ...prev];
+      const next = [...prev];
+      next[idx] = input;
+      return next;
+    });
+    setEditingId(null);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 20 }}
+      className="flex flex-col flex-1 min-h-0 gap-4 h-full overflow-hidden"
+    >
+      <div className="flex items-end justify-between ac-border-b pb-2 shrink-0">
+        <div>
+          <h2 className="text-xl md:text-2xl font-bold tracking-widest text-shadow-glow">提示词预设管理器</h2>
+          <p className="text-[10px] md:text-xs font-mono text-[var(--color-ac-ui)] uppercase tracking-widest mt-1">
+            Prompt Presets // Local Config
+          </p>
+        </div>
+      </div>
+
+      <div className="shrink-0 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="搜索提示词标题或内容..."
+          className="w-full md:max-w-sm bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+        />
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setEditingId(
+                (() => {
+                  const id = createPromptBlockId();
+                  const newBlock: PromptBlock = {
+                    id,
+                    title: '新提示词',
+                    type: 'Static',
+                    role: 'System',
+                    content: '',
+                    enabled: true,
+                  };
+                  setBlocks(prev => [newBlock, ...prev]);
+                  return id;
+                })(),
+              )
+            }
+            className="px-3 py-2 text-xs font-bold tracking-widest bg-cyan-900/30 border border-cyan-500/50 text-cyan-300 hover:bg-cyan-700/40 transition-colors flex items-center gap-2"
+          >
+            <Plus size={14} /> 添加提示词
+          </button>
+          <button
+            type="button"
+            onClick={() => setBlocks(prev => prev.filter(b => b.enabled))}
+            className="px-3 py-2 text-xs font-bold tracking-widest bg-red-900/20 border border-red-500/40 text-red-300 hover:bg-red-700/30 transition-colors"
+          >
+            批量删除禁用
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col gap-3">
+        {filteredBlocks.map(block => (
+          <div
+            key={block.id}
+            className="bg-[var(--color-ac-ui)]/10 border border-[var(--color-ac-ui)]/30 rounded-sm px-3 py-3 flex items-center gap-3"
+          >
+            <div className="shrink-0 flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => moveBlock(block.id, -1)}
+                className="p-1 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] disabled:opacity-30"
+                disabled={blocks.findIndex(x => x.id === block.id) <= 0}
+                aria-label="上移"
+              >
+                <ArrowUp size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => moveBlock(block.id, 1)}
+                className="p-1 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] disabled:opacity-30"
+                disabled={blocks.findIndex(x => x.id === block.id) === blocks.length - 1}
+                aria-label="下移"
+              >
+                <ArrowDown size={14} />
+              </button>
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="text-base font-semibold tracking-wide truncate">{block.title || '未命名提示词'}</div>
+              <div className="mt-1 flex gap-2 text-[10px] font-mono">
+                <span className="px-2 py-0.5 bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 rounded-full">
+                  {BLOCK_TYPE_LABEL[block.type]}
+                </span>
+                <span className="px-2 py-0.5 bg-[var(--color-ac-ui)]/20 text-[var(--color-ac-ui)] border border-[var(--color-ac-ui)]/30 rounded-full">
+                  {BLOCK_ROLE_LABEL[block.role]}
+                </span>
+              </div>
+            </div>
+
+            <div className="shrink-0 flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPreviewId(block.id)}
+                className="p-2 text-[var(--color-ac-ui)] hover:text-cyan-300 hover:bg-cyan-900/20 rounded-sm transition-colors"
+                aria-label="预览"
+              >
+                <Eye size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingId(block.id)}
+                className="p-2 text-[var(--color-ac-ui)] hover:text-cyan-300 hover:bg-cyan-900/20 rounded-sm transition-colors"
+                aria-label="编辑"
+              >
+                <Pencil size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setBlocks(prev => prev.filter(x => x.id !== block.id))}
+                className="p-2 text-[var(--color-ac-ui)] hover:text-red-300 hover:bg-red-900/20 rounded-sm transition-colors"
+                aria-label="删除"
+              >
+                <Trash2 size={16} />
+              </button>
+              <label className="ml-1 flex items-center gap-2 text-xs text-[var(--color-ac-ui)] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={block.enabled}
+                  onChange={e =>
+                    setBlocks(prev =>
+                      prev.map(x => (x.id === block.id ? { ...x, enabled: e.target.checked } : x)),
+                    )
+                  }
+                  className="accent-cyan-500"
+                />
+                启用
+              </label>
+            </div>
+          </div>
+        ))}
+        {filteredBlocks.length === 0 && (
+          <div className="text-xs text-[var(--color-ac-ui)]/70 px-2 py-6">没有匹配的提示词块。</div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {editingBlock && (
+          <PromptBlockEditorModal
+            block={editingBlock}
+            onClose={() => setEditingId(null)}
+            onSave={upsertBlock}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {previewBlock && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <div className="w-full max-w-3xl bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-5 relative">
+              <button
+                type="button"
+                onClick={() => setPreviewId(null)}
+                className="absolute top-3 right-3 text-[var(--color-ac-ui)] hover:text-white"
+              >
+                <X size={18} />
+              </button>
+              <h3 className="text-lg font-bold tracking-widest mb-2">{previewBlock.title || '未命名提示词'}</h3>
+              <div className="text-[10px] font-mono text-[var(--color-ac-ui)] mb-4">
+                {BLOCK_TYPE_LABEL[previewBlock.type]} / {BLOCK_ROLE_LABEL[previewBlock.role]} /{' '}
+                {previewBlock.enabled ? '已启用' : '已禁用'}
+              </div>
+              <pre className="whitespace-pre-wrap text-sm leading-relaxed bg-black/30 border border-[var(--color-ac-ui)]/20 p-3 max-h-[55vh] overflow-y-auto">
+                {previewBlock.content || '(空内容)'}
+              </pre>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+};
+
+const PromptBlockEditorModal = ({
+  block,
+  onClose,
+  onSave,
+}: {
+  block: PromptBlock;
+  onClose: () => void;
+  onSave: (next: PromptBlock) => void;
+}) => {
+  const [draft, setDraft] = useState<PromptBlock>(block);
+
+  useEffect(() => {
+    setDraft(block);
+  }, [block]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 8 }}
+        className="w-full max-w-3xl bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-5 relative"
+      >
+        <button type="button" onClick={onClose} className="absolute top-3 right-3 text-[var(--color-ac-ui)] hover:text-white">
+          <X size={18} />
+        </button>
+        <h3 className="text-lg font-bold tracking-widest mb-4">编辑内容</h3>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-[var(--color-ac-ui)]">标题</label>
+            <input
+              type="text"
+              value={draft.title}
+              onChange={e => setDraft(prev => ({ ...prev, title: e.target.value }))}
+              className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-[var(--color-ac-ui)]">类型</label>
+              <select
+                value={draft.type}
+                onChange={e => setDraft(prev => ({ ...prev, type: e.target.value as PromptBlockType }))}
+                className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+              >
+                <option value="Static">静态</option>
+                <option value="Dynamic">动态</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-[var(--color-ac-ui)]">角色</label>
+              <select
+                value={draft.role}
+                onChange={e => setDraft(prev => ({ ...prev, role: e.target.value as PromptBlockRole }))}
+                className="bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+              >
+                <option value="System">系统</option>
+                <option value="User">用户</option>
+                <option value="Assistant">AI</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-[var(--color-ac-ui)]">内容</label>
+            <textarea
+              value={draft.content}
+              onChange={e => setDraft(prev => ({ ...prev, content: e.target.value }))}
+              className="min-h-48 bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm leading-relaxed focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 mt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm border border-[var(--color-ac-ui)]/30 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] hover:border-[var(--color-ac-ui)]"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => onSave({ ...draft, title: draft.title.trim() || '未命名提示词' })}
+              className="px-4 py-2 text-sm border border-cyan-500/50 bg-cyan-900/30 text-cyan-300 hover:bg-cyan-700/40"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
@@ -908,6 +1296,7 @@ export default function App() {
     { id: 'GARAGE', label: '机库整备', icon: <Wrench size={18} />, en: 'GARAGE' },
     { id: 'ROMANCE', label: '通讯频道', icon: <Heart size={18} />, en: 'COMPANIONS' },
     { id: 'MISSIONS', label: '作战与行动', icon: <Crosshair size={18} />, en: 'SORTIE' },
+    { id: 'SETTINGS', label: '提示词预设', icon: <Settings size={18} />, en: 'PROMPTS' },
   ];
 
   // Toggle tab logic: if clicking the active tab, close it (set to null)
@@ -1077,6 +1466,7 @@ export default function App() {
                 )}
                 {activeTab === 'ROMANCE' && <RomanceView key="ROMANCE" statData={statData} />}
                 {activeTab === 'MISSIONS' && <MissionView key="MISSIONS" statData={statData} />}
+                {activeTab === 'SETTINGS' && <PromptPresetManagerView key="SETTINGS" />}
                 {activeTab === 'ALLMIND' && <AllmindView key="ALLMIND" input={chatInput} setInput={setChatInput} />}
               </AnimatePresence>
             </div>
