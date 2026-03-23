@@ -395,7 +395,7 @@ const StatusView = ({ display }: { display: StatusDisplay }) => (
     initial={{ opacity: 0, x: -20 }}
     animate={{ opacity: 1, x: 0 }}
     exit={{ opacity: 0, x: 20 }}
-    className="flex flex-col gap-6 flex-1 min-h-0 h-full overflow-y-auto pr-2 md:pr-4"
+    className="flex flex-col gap-6 flex-1 overflow-y-auto pr-2 md:pr-4 min-h-[22rem] md:min-h-[28rem]"
   >
     <div className="flex items-end justify-between ac-border-b pb-2">
       <div>
@@ -2067,7 +2067,7 @@ export default function App() {
         <div
           className={cn(
             // 移动端全宽；桌面端主面板不必过窄，避免 ALLMIND/机库横向吃紧
-            'flex-1 relative w-full min-h-0 transition-all duration-300 md:max-w-4xl lg:max-w-5xl',
+            'flex-1 relative w-full min-h-[22rem] md:min-h-[28rem] transition-all duration-300 md:max-w-4xl lg:max-w-5xl',
             activeTab === null ? 'hidden' : 'flex flex-col',
           )}
         >
@@ -2084,7 +2084,7 @@ export default function App() {
             RETURN TO MENU
           </button>
 
-          <div className="relative w-full h-full min-h-0 bg-[var(--color-ac-panel)] backdrop-blur-md border border-[var(--color-ac-ui)]/20 p-4 md:p-8 shadow-2xl flex-1 flex flex-col overflow-hidden">
+          <div className="relative w-full min-h-0 bg-[var(--color-ac-panel)] backdrop-blur-md border border-[var(--color-ac-ui)]/20 p-4 md:p-8 shadow-2xl flex-1 flex flex-col overflow-hidden">
             {/* Decorative corner brackets */}
             <div className="absolute -top-1 -left-1 w-3 h-3 border-t border-l border-[var(--color-ac-ui)]" />
             <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b border-l border-[var(--color-ac-ui)]" />

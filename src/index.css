@@ -32,7 +32,8 @@
   html {
     width: 100%;
     max-width: 100%;
-    min-height: clamp(36rem, 100dvh, 2200px);
+    min-height: clamp(36rem, 100dvh, 2200px) !important;
+    height: auto !important;
   }
 
   body {
@@ -43,7 +44,8 @@
     overflow-y: auto;
     width: 100%;
     max-width: 100%;
-    min-height: clamp(36rem, 100dvh, 2200px);
+    min-height: clamp(36rem, 100dvh, 2200px) !important;
+    height: auto !important;
     /* Prevent text selection for a more app-like feel */
     user-select: none;
   }
@@ -51,7 +53,8 @@
   #root {
     width: 100%;
     max-width: 100%;
-    min-height: clamp(36rem, 100dvh, 2200px);
+    min-height: clamp(36rem, 100dvh, 2200px) !important;
+    height: auto !important;
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
