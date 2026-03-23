@@ -839,6 +839,17 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   const [showSettings, setShowSettings] = useState(false);
   const [showPromptManager, setShowPromptManager] = useState(false);
   const [useTavernContext, setUseTavernContext] = useState(true);
+  const [contextFloors, setContextFloors] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('allmind_context_floors');
+      const n = saved ? Number(saved) : 6;
+      if (!Number.isFinite(n)) return 6;
+      const floored = Math.floor(n);
+      return Math.min(20, Math.max(0, floored));
+    } catch {
+      return 6;
+    }
+  });
   const [models, setModels] = useState<string[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -874,6 +885,14 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   useEffect(() => {
     localStorage.setItem(PROMPT_PRESET_STORAGE_KEY, JSON.stringify(promptStore));
   }, [promptStore]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('allmind_context_floors', String(contextFloors));
+    } catch {
+      /* */
+    }
+  }, [contextFloors]);
 
   useEffect(() => {
     const el = chatScrollRef.current;
@@ -942,9 +961,9 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
 
     try {
       const presetPrompt = buildAllmindSystemPrompt(promptBlocks);
-      const ctx = useTavernContext ? readTavernContextSnippet(6) : '';
+      const ctx = useTavernContext && contextFloors > 0 ? readTavernContextSnippet(contextFloors) : '';
       const finalSystemPrompt = ctx
-        ? `${presetPrompt}\n\n【当前酒馆正文上下文（最近6条）】\n${ctx}`
+        ? `${presetPrompt}\n\n【当前酒馆正文上下文（最近${contextFloors}条）】\n${ctx}`
         : presetPrompt;
       const msgsForApi = promptStore.mergeSameRoleMessages
         ? mergeConsecutiveSameRoleMessages(newMessages)
@@ -998,39 +1017,57 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
       exit={{ opacity: 0, x: 20 }}
       className="flex flex-col flex-1 min-h-0 h-full overflow-hidden relative"
     >
-      <div className="flex items-end justify-between ac-border-b pb-2 mb-4 shrink-0">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between ac-border-b pb-2 mb-4 shrink-0 min-w-0">
+        <div className="min-w-0">
           <h2 className="text-xl md:text-2xl font-bold tracking-widest text-shadow-glow text-cyan-400">ALLMIND 助手</h2>
           <p className="text-[10px] md:text-xs font-mono text-[var(--color-ac-ui)] uppercase tracking-widest mt-1">
             AI Integration // Override
           </p>
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-2">
             <button
               type="button"
               onClick={() => setShowPromptManager(true)}
-              className="text-[10px] px-2 py-1 border border-cyan-500/50 bg-cyan-900/30 text-cyan-300 hover:bg-cyan-700/40 transition-colors tracking-widest"
+              className="text-[10px] px-3 py-2 sm:px-2 sm:py-1 border border-cyan-500/50 bg-cyan-900/30 text-cyan-300 hover:bg-cyan-700/40 transition-colors tracking-widest"
             >
               提示词预设
             </button>
             <button
               type="button"
               onClick={() => setShowSettings(!showSettings)}
-              className="text-[10px] px-2 py-1 border border-[var(--color-ac-ui)]/50 bg-[var(--color-ac-ui)]/20 text-[var(--color-ac-text)] hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors tracking-widest"
+              className="text-[10px] px-3 py-2 sm:px-2 sm:py-1 border border-[var(--color-ac-ui)]/50 bg-[var(--color-ac-ui)]/20 text-[var(--color-ac-text)] hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors tracking-widest"
             >
               API 配置
             </button>
-            <span className="text-[10px] text-[var(--color-ac-ui)]/80 font-mono">
+            <span className="text-[10px] text-[var(--color-ac-ui)]/80 font-mono max-w-full truncate hidden sm:inline">
               预设: {activePresetSlot.name} / 启用 {promptBlocks.filter(b => b.enabled).length}
             </span>
-            <label className="ml-1 flex items-center gap-1 text-[10px] text-[var(--color-ac-ui)] font-mono cursor-pointer select-none">
+            <label className="flex items-center gap-1.5 text-[10px] text-[var(--color-ac-ui)] font-mono cursor-pointer select-none min-h-[44px] sm:min-h-0 py-1">
               <input
                 type="checkbox"
                 checked={useTavernContext}
                 onChange={e => setUseTavernContext(e.target.checked)}
-                className="accent-cyan-500"
+                className="accent-cyan-500 size-4 shrink-0"
               />
               读取正文
             </label>
+
+            <div className={cn('w-full', !useTavernContext && 'opacity-60')}>
+              <div className="flex items-center justify-between text-[10px] font-mono text-[var(--color-ac-ui)] px-1 mb-1">
+                <span>读取上下文条数</span>
+                <span className="text-[var(--color-ac-text)]">{contextFloors} 条</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                step={1}
+                value={contextFloors}
+                onChange={e => setContextFloors(Number(e.target.value))}
+                disabled={!useTavernContext}
+                aria-label="读取上下文条数"
+                className="ac-context-range"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -1223,6 +1260,14 @@ const PromptPresetManagerModal = ({
   const blocks = active.blocks;
 
   useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!showMoreMenu) return;
     const onDoc = (e: MouseEvent) => {
       if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) setShowMoreMenu(false);
@@ -1378,23 +1423,23 @@ const PromptPresetManagerModal = ({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 z-[110] bg-black/75 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-[200] bg-black/75 backdrop-blur-sm flex items-center justify-center ac-p-safe-modal overflow-hidden min-h-0"
     >
-      <div className="w-full max-w-5xl bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-4 relative">
+      <div className="w-full max-w-5xl max-h-full min-h-0 flex flex-col bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-4 relative overflow-hidden">
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 text-[var(--color-ac-ui)] hover:text-white"
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center text-[var(--color-ac-ui)] hover:text-white z-10"
         >
           <X size={18} />
         </button>
 
-        <div className="pr-10 mb-3">
+        <div className="shrink-0 pr-14 sm:pr-10 mb-3">
           <h3 className="text-sm font-bold text-[var(--color-ac-text)] tracking-widest">提示词顺序</h3>
           <p className="text-[10px] text-[var(--color-ac-ui)] mt-0.5">切换本地预设；导入会新增一套，不覆盖当前列表</p>
         </div>
 
-        <div className="flex flex-wrap items-end gap-2 mb-3">
+        <div className="shrink-0 flex flex-wrap items-end gap-2 mb-3">
           <div className="flex-1 min-w-[12rem] flex flex-col gap-1">
             <label className="text-[10px] font-mono text-[var(--color-ac-ui)] tracking-wider">本地预设</label>
             <select
@@ -1440,7 +1485,7 @@ const PromptPresetManagerModal = ({
               <MoreHorizontal size={18} />
             </button>
             {showMoreMenu && (
-              <div className="absolute right-0 top-full mt-1 z-20 min-w-[10rem] border border-[var(--color-ac-ui)]/40 bg-black/95 py-1 text-xs shadow-lg">
+              <div className="absolute right-0 top-full mt-1 z-20 min-w-[10rem] max-sm:left-0 max-sm:right-auto border border-[var(--color-ac-ui)]/40 bg-black/95 py-1 text-xs shadow-lg">
                 <button
                   type="button"
                   className="w-full text-left px-3 py-2 hover:bg-cyan-900/40 text-[var(--color-ac-text)]"
@@ -1538,21 +1583,21 @@ const PromptPresetManagerModal = ({
           </div>
         </div>
 
-        <p className="text-[10px] text-[var(--color-ac-ui)]/80 mb-2">
+        <p className="shrink-0 text-[10px] text-[var(--color-ac-ui)]/80 mb-2">
           拖拽暂用上下箭头调整顺序；点击铅笔编辑内容（当前：{active.name}）
         </p>
 
-        <div className="max-h-[55vh] overflow-y-auto pr-1 flex flex-col gap-3">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 flex flex-col gap-3">
           {filteredBlocks.map(block => (
             <div
               key={block.id}
-              className="bg-[var(--color-ac-ui)]/10 border border-[var(--color-ac-ui)]/30 rounded-sm px-3 py-3 flex items-center gap-3"
+              className="bg-[var(--color-ac-ui)]/10 border border-[var(--color-ac-ui)]/30 rounded-sm px-3 py-3 flex flex-col gap-3 sm:flex-row sm:items-center"
             >
-              <div className="shrink-0 flex flex-col gap-1">
+              <div className="shrink-0 flex flex-row sm:flex-col gap-1 justify-center sm:justify-start">
                 <button
                   type="button"
                   onClick={() => moveBlock(block.id, -1)}
-                  className="p-1 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] disabled:opacity-30"
+                  className="p-2 sm:p-1 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] disabled:opacity-30"
                   disabled={blocks.findIndex(x => x.id === block.id) <= 0}
                   aria-label="上移"
                 >
@@ -1561,7 +1606,7 @@ const PromptPresetManagerModal = ({
                 <button
                   type="button"
                   onClick={() => moveBlock(block.id, 1)}
-                  className="p-1 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] disabled:opacity-30"
+                  className="p-2 sm:p-1 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] disabled:opacity-30"
                   disabled={blocks.findIndex(x => x.id === block.id) === blocks.length - 1}
                   aria-label="下移"
                 >
@@ -1581,11 +1626,11 @@ const PromptPresetManagerModal = ({
                 </div>
               </div>
 
-              <div className="shrink-0 flex items-center gap-1">
+              <div className="shrink-0 flex flex-wrap items-center justify-end sm:justify-start gap-1 w-full sm:w-auto pt-2 sm:pt-0 border-t border-[var(--color-ac-ui)]/25 sm:border-t-0">
                 <button
                   type="button"
                   onClick={() => setPreviewId(block.id)}
-                  className="p-2 text-[var(--color-ac-ui)] hover:text-cyan-300 hover:bg-cyan-900/20 rounded-sm transition-colors"
+                  className="p-2.5 sm:p-2 text-[var(--color-ac-ui)] hover:text-cyan-300 hover:bg-cyan-900/20 rounded-sm transition-colors"
                   aria-label="预览"
                 >
                   <Eye size={16} />
@@ -1593,7 +1638,7 @@ const PromptPresetManagerModal = ({
                 <button
                   type="button"
                   onClick={() => setEditingId(block.id)}
-                  className="p-2 text-[var(--color-ac-ui)] hover:text-cyan-300 hover:bg-cyan-900/20 rounded-sm transition-colors"
+                  className="p-2.5 sm:p-2 text-[var(--color-ac-ui)] hover:text-cyan-300 hover:bg-cyan-900/20 rounded-sm transition-colors"
                   aria-label="编辑"
                 >
                   <Pencil size={16} />
@@ -1601,12 +1646,12 @@ const PromptPresetManagerModal = ({
                 <button
                   type="button"
                   onClick={() => onChangeBlocks(blocks.filter(x => x.id !== block.id))}
-                  className="p-2 text-[var(--color-ac-ui)] hover:text-red-300 hover:bg-red-900/20 rounded-sm transition-colors"
+                  className="p-2.5 sm:p-2 text-[var(--color-ac-ui)] hover:text-red-300 hover:bg-red-900/20 rounded-sm transition-colors"
                   aria-label="删除"
                 >
                   <Trash2 size={16} />
                 </button>
-                <label className="ml-1 flex items-center gap-2 text-xs text-[var(--color-ac-ui)] cursor-pointer select-none">
+                <label className="ml-1 flex items-center gap-2 text-xs text-[var(--color-ac-ui)] cursor-pointer select-none min-h-[44px] sm:min-h-0">
                   <input
                     type="checkbox"
                     checked={block.enabled}
@@ -1644,22 +1689,22 @@ const PromptPresetManagerModal = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+            className="absolute inset-0 z-[210] bg-black/70 backdrop-blur-sm flex items-center justify-center ac-p-safe-modal min-h-0"
           >
-            <div className="w-full max-w-3xl bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-5 relative">
+            <div className="w-full max-w-3xl max-h-full min-h-0 flex flex-col bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-4 sm:p-5 relative overflow-hidden">
               <button
                 type="button"
                 onClick={() => setPreviewId(null)}
-                className="absolute top-3 right-3 text-[var(--color-ac-ui)] hover:text-white"
+                className="absolute top-2 right-2 sm:top-3 sm:right-3 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center text-[var(--color-ac-ui)] hover:text-white"
               >
                 <X size={18} />
               </button>
-              <h3 className="text-lg font-bold tracking-widest mb-2">{previewBlock.title || '未命名提示词'}</h3>
-              <div className="text-[10px] font-mono text-[var(--color-ac-ui)] mb-4">
+              <h3 className="shrink-0 text-lg font-bold tracking-widest mb-2">{previewBlock.title || '未命名提示词'}</h3>
+              <div className="shrink-0 text-[10px] font-mono text-[var(--color-ac-ui)] mb-4">
                 {BLOCK_TYPE_LABEL[previewBlock.type]} / {BLOCK_ROLE_LABEL[previewBlock.role]} /{' '}
                 {previewBlock.enabled ? '已启用' : '已禁用'}
               </div>
-              <pre className="whitespace-pre-wrap text-sm leading-relaxed bg-black/30 border border-[var(--color-ac-ui)]/20 p-3 max-h-[55vh] overflow-y-auto">
+              <pre className="flex-1 min-h-0 overflow-y-auto overscroll-contain whitespace-pre-wrap text-sm leading-relaxed bg-black/30 border border-[var(--color-ac-ui)]/20 p-3">
                 {previewBlock.content || '(空内容)'}
               </pre>
             </div>
@@ -1690,15 +1735,19 @@ const PromptBlockEditorModal = ({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 z-[110] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      className="absolute inset-0 z-[210] bg-black/70 backdrop-blur-sm flex items-center justify-center ac-p-safe-modal min-h-0"
     >
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 8 }}
-        className="w-full max-w-3xl bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-5 relative"
+        className="w-full max-w-3xl max-h-full min-h-0 flex flex-col overflow-y-auto overscroll-contain bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-4 sm:p-5 relative"
       >
-        <button type="button" onClick={onClose} className="absolute top-3 right-3 text-[var(--color-ac-ui)] hover:text-white">
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute top-2 right-2 sm:top-3 sm:right-3 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center text-[var(--color-ac-ui)] hover:text-white"
+        >
           <X size={18} />
         </button>
         <h3 className="text-lg font-bold tracking-widest mb-4">编辑内容</h3>
@@ -1776,6 +1825,9 @@ const PromptBlockEditorModal = ({
 export default function App() {
   // 默认打开状态总览：activeTab 为 null 时右侧主面板整段 `hidden`，在 ST 里会像「只有灰底没有 UI」
   const [activeTab, setActiveTab] = useState<Tab>('STATUS');
+  // 防抖：避免连续点击 tab 触发 activeTab 在 null/非 null 间反复切换导致布局大幅抖动
+  const [tabLocked, setTabLocked] = useState(false);
+  const tabLockTimerRef = useRef<number | null>(null);
   const [time, setTime] = useState(new Date());
   const [bgUrl, setBgUrl] = useState('');
   const [showBgSettings, setShowBgSettings] = useState(false);
@@ -1783,11 +1835,26 @@ export default function App() {
   const { display, statData } = useStatData();
 
   useEffect(() => {
+    return () => {
+      if (tabLockTimerRef.current) window.clearTimeout(tabLockTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     const savedBg = localStorage.getItem('ac_bg_url');
     if (savedBg) setBgUrl(savedBg);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!showBgSettings) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [showBgSettings]);
 
   const handleBgSave = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1812,9 +1879,13 @@ export default function App() {
     { id: 'MISSIONS', label: '作战与行动', icon: <Crosshair size={18} />, en: 'SORTIE' },
   ];
 
-  // Toggle tab logic: if clicking the active tab, close it (set to null)
   const handleTabClick = (id: Tab) => {
-    setActiveTab(prev => (prev === id ? null : id));
+    if (tabLocked) return;
+    setTabLocked(true);
+    if (tabLockTimerRef.current) window.clearTimeout(tabLockTimerRef.current);
+    tabLockTimerRef.current = window.setTimeout(() => setTabLocked(false), 350);
+    // 点击同一个 tab：不再切到 null（从根上消除连续点击引发的左右位移）
+    setActiveTab(prev => (prev === id ? prev : id));
   };
 
   const shellDim = 'clamp(36rem, 100dvh, 2200px)';
@@ -1840,29 +1911,30 @@ export default function App() {
       <div className="absolute inset-0 z-40 pointer-events-none shadow-[inset_0_0_150px_rgba(0,0,0,0.9)]" />
 
       {/* Top Bar (Global Info) */}
-      <div className="absolute top-0 left-0 w-full h-8 flex justify-between items-center px-4 md:px-6 z-30 text-[10px] font-mono text-[var(--color-ac-ui)] tracking-widest border-b border-[var(--color-ac-ui)]/20 bg-black/40 backdrop-blur-sm">
-        <div className="flex gap-4 md:gap-6">
-          <span className="hidden md:inline">SYS.VER 1.0.4</span>
-          <span className="flex items-center gap-2">
+      <div className="absolute top-0 left-0 w-full min-h-8 flex justify-between items-center gap-2 px-4 md:px-6 pt-[env(safe-area-inset-top,0px)] pb-1 z-30 text-[10px] font-mono text-[var(--color-ac-ui)] tracking-widest border-b border-[var(--color-ac-ui)]/20 bg-black/40 backdrop-blur-sm">
+        <div className="flex gap-2 md:gap-6 min-w-0 shrink">
+          <span className="hidden md:inline shrink-0">SYS.VER 1.0.4</span>
+          <span className="flex items-center gap-2 shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> ONLINE
           </span>
         </div>
-        <div className="flex gap-4 md:gap-6">
-          <span className="hidden md:inline">{display.locLine}</span>
-          <span>
+        <div className="flex gap-2 md:gap-6 min-w-0 justify-end text-right">
+          <span className="hidden md:inline truncate max-w-[40vw]">{display.locLine}</span>
+          <span className="tabular-nums truncate max-w-[min(100%,12rem)] sm:max-w-none">
             {display.gameTime || `${time.toISOString().replace('T', ' ').substring(0, 19)} UTC`}
           </span>
         </div>
       </div>
 
       {/* Main Layout */}
-      <div className="relative z-10 flex flex-col md:flex-row w-full h-full min-h-0 pt-12 pb-4 md:pb-8 px-4 md:px-8 gap-4 md:gap-8">
+      <div className="relative z-10 flex flex-col md:flex-row w-full h-full min-h-0 ac-pt-below-topbar ac-pb-shell ac-px-shell gap-4 md:gap-8">
         {/* Left Sidebar (Navigation) */}
         <div
           className={cn(
-            'flex flex-col shrink-0 transition-all duration-300',
+            // h-full + min-h-0：与主栏同高，nav 的 flex-1 + 底栏 mt-auto 才能稳定贴底（避免通讯/作战等页底栏「悬在中间」）
+            'flex flex-col shrink-0 transition-all duration-300 h-full min-h-0 md:self-stretch',
             'w-full md:w-64',
-            activeTab !== null ? 'hidden md:flex' : 'flex h-full',
+            activeTab !== null ? 'hidden md:flex' : 'flex',
           )}
         >
           <div className="mb-8 md:mb-12">
@@ -1873,13 +1945,15 @@ export default function App() {
             <div className="h-[1px] w-full bg-gradient-to-r from-[var(--color-ac-ui)] to-transparent mt-2" />
           </div>
 
-          <nav className="flex flex-col gap-2 flex-1">
+          <nav className="flex flex-col gap-2 flex-1 min-h-0">
             {tabs.map(tab => {
               const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
+                  type="button"
                   onClick={() => handleTabClick(tab.id)}
+                  disabled={tabLocked}
                   className={cn(
                     'relative group flex items-center justify-between w-full px-4 py-3 md:py-4 text-left transition-all duration-200',
                     'border-l-2',
@@ -1927,6 +2001,8 @@ export default function App() {
 
             <button
               onClick={() => handleTabClick('ALLMIND')}
+              type="button"
+              disabled={tabLocked}
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 transition-all duration-200 border-l-2',
                 activeTab === 'ALLMIND'
@@ -1946,13 +2022,18 @@ export default function App() {
         {/* Main Content Area */}
         <div
           className={cn(
-            'flex-1 relative w-full max-w-3xl min-h-0 transition-all duration-300',
+            // 移动端全宽；桌面端主面板不必过窄，避免 ALLMIND/机库横向吃紧
+            'flex-1 relative w-full min-h-0 transition-all duration-300 md:max-w-4xl lg:max-w-5xl',
             activeTab === null ? 'hidden' : 'flex flex-col',
           )}
         >
           {/* Mobile Back Button */}
           <button
-            onClick={() => setActiveTab(null)}
+            type="button"
+            onClick={() => {
+              setTabLocked(false);
+              setActiveTab(null);
+            }}
             className="md:hidden flex items-center gap-2 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] mb-4 font-mono text-xs tracking-widest"
           >
             <ChevronRight size={14} className="rotate-180" />
@@ -1985,8 +2066,13 @@ export default function App() {
 
             {/* Close Button (Desktop) */}
             <button
-              onClick={() => setActiveTab(null)}
-              className="hidden md:flex absolute top-4 right-4 text-[var(--color-ac-ui)] hover:text-red-400 transition-colors"
+              type="button"
+              onClick={() => {
+                setTabLocked(false);
+                setActiveTab(null);
+              }}
+              className="hidden md:flex absolute top-2 right-2 md:top-4 md:right-4 p-2 text-[var(--color-ac-ui)] hover:text-red-400 transition-colors"
+              aria-label="关闭面板"
             >
               <X size={24} />
             </button>
@@ -2001,12 +2087,12 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center ac-p-safe-modal overflow-y-auto min-h-0"
           >
-            <div className="bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-6 max-w-md w-full relative">
+            <div className="bg-[var(--color-ac-panel)] border border-[var(--color-ac-ui)]/30 p-5 sm:p-6 max-w-md w-full max-h-full min-h-0 overflow-y-auto overscroll-contain relative my-auto">
               <button
                 onClick={() => setShowBgSettings(false)}
-                className="absolute top-4 right-4 text-[var(--color-ac-ui)] hover:text-white"
+                className="absolute top-3 right-3 sm:top-4 sm:right-4 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center text-[var(--color-ac-ui)] hover:text-white"
               >
                 <X size={20} />
               </button>

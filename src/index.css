@@ -13,6 +13,21 @@
 }
 
 @layer base {
+  button,
+  [type='button'],
+  [type='submit'] {
+    touch-action: manipulation;
+  }
+
+  /* iOS：输入框字号 <16px 会强制缩放视口，打断弹层布局 */
+  @media (max-width: 639px) {
+    input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
+
   /* Embed-friendly: ST message bubbles size to content; give html/body/#root a real height floor. */
   html {
     width: 100%;
@@ -46,6 +61,33 @@
 }
 
 @layer utilities {
+  /* 刘海屏 / Home Indicator：与 fixed 弹层、顶栏留白配合 */
+  .ac-pt-below-topbar {
+    padding-top: calc(3rem + env(safe-area-inset-top, 0px));
+  }
+  .ac-p-safe-modal {
+    padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px))
+      max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+  }
+  .ac-px-shell {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+  @media (min-width: 768px) {
+    .ac-px-shell {
+      padding-left: max(2rem, env(safe-area-inset-left, 0px));
+      padding-right: max(2rem, env(safe-area-inset-right, 0px));
+    }
+  }
+  .ac-pb-shell {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  }
+  @media (min-width: 768px) {
+    .ac-pb-shell {
+      padding-bottom: max(2rem, env(safe-area-inset-bottom, 0px));
+    }
+  }
+
   .scanlines {
     background: linear-gradient(
       to bottom,
@@ -87,5 +129,42 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-ac-text);
+  }
+
+  /* 上下文条数滑动条（参考截图） */
+  input[type='range'].ac-context-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 9999px;
+    background: rgba(114, 130, 131, 0.35);
+    outline: none;
+  }
+
+  input[type='range'].ac-context-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: #22d3ee;
+    border: 2px solid rgba(216, 232, 233, 0.25);
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
+    cursor: pointer;
+  }
+
+  input[type='range'].ac-context-range::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: #22d3ee;
+    border: 2px solid rgba(216, 232, 233, 0.25);
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.35);
+    cursor: pointer;
+  }
+
+  input[type='range'].ac-context-range:disabled {
+    opacity: 0.55;
   }
 }
