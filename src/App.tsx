@@ -667,7 +667,7 @@ const RomanceView = ({ statData }: { statData: StatData | undefined }) => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 flex gap-6 overflow-x-auto pb-4 items-stretch px-4 md:px-8 snap-x">
+      <div className="flex-1 min-h-0 flex gap-6 overflow-x-auto items-stretch px-4 md:px-8 snap-x">
         {rows.map((comp, idx) => (
           <motion.div
             key={comp.id}
@@ -801,7 +801,7 @@ const MissionView = ({ statData }: { statData: StatData | undefined }) => {
               key={selected.id}
               className="flex flex-col z-10 flex-1"
             >
-              <div className="flex items-center gap-2 mb-4">
+              <div className="flex items-center gap-2">
                 <Crosshair className="text-cyan-400" size={24} />
                 <h3 className="text-xl font-bold tracking-widest">{selected.title}</h3>
               </div>
@@ -1037,7 +1037,7 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
       exit={{ opacity: 0, x: 20 }}
       className="flex flex-col flex-1 min-h-0 h-full overflow-hidden relative"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between ac-border-b pb-2 mb-4 shrink-0 min-w-0">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between ac-border-b pb-2 shrink-0 min-w-0">
         <div className="min-w-0">
           <h2 className="text-xl md:text-2xl font-bold tracking-widest text-shadow-glow text-cyan-400">ALLMIND 助手</h2>
           <p className="text-[10px] md:text-xs font-mono text-[var(--color-ac-ui)] uppercase tracking-widest mt-1">
