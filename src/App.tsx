@@ -12,8 +12,10 @@ import {
   Eye,
   Heart,
   Image as ImageIcon,
+  MoreHorizontal,
   Pencil,
   Plus,
+  Save,
   Send,
   Settings,
   Shield,
@@ -24,7 +26,16 @@ import {
   Zap
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type FormEvent,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import { twMerge } from 'tailwind-merge';
 import type { StatData, StatusDisplay } from './statDataTypes';
 import { rtGetChatMessages, rtGetLastMessageId } from './tavernRuntime';
@@ -85,19 +96,199 @@ function createPromptBlockId(): string {
 
 type PromptPresetPack = { presetName: string; blocks: PromptBlock[] };
 
-function loadPromptPresetPack(): PromptPresetPack {
+/** 单套预设槽位（可切换） */
+type PromptPresetSlot = { id: string; name: string; blocks: PromptBlock[] };
+
+/** 本地多预设存储（v2） */
+type PromptPresetStoreV2 = {
+  version: 2;
+  activePresetId: string;
+  presets: PromptPresetSlot[];
+  mergeSameRoleMessages: boolean;
+};
+
+function createPresetSlotId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') return `ps_${globalThis.crypto.randomUUID()}`;
+  return `ps_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function defaultPromptPresetStore(): PromptPresetStoreV2 {
+  const id = createPresetSlotId();
+  return {
+    version: 2,
+    activePresetId: id,
+    presets: [{ id, name: '默认预设', blocks: DEFAULT_PROMPT_BLOCKS }],
+    mergeSameRoleMessages: false,
+  };
+}
+
+function loadPromptPresetStore(): PromptPresetStoreV2 {
   try {
     const raw = localStorage.getItem(PROMPT_PRESET_STORAGE_KEY);
-    if (!raw) return { presetName: '默认预设', blocks: DEFAULT_PROMPT_BLOCKS };
-    const parsed = JSON.parse(raw) as Partial<PromptPresetPack> | PromptBlock[];
-    if (Array.isArray(parsed)) return { presetName: '默认预设', blocks: parsed };
-    return {
-      presetName: typeof parsed.presetName === 'string' && parsed.presetName.trim() ? parsed.presetName : '默认预设',
-      blocks: Array.isArray(parsed.blocks) ? parsed.blocks : DEFAULT_PROMPT_BLOCKS,
-    };
+    if (!raw) return defaultPromptPresetStore();
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (parsed && typeof parsed === 'object' && (parsed as { version?: number }).version === 2) {
+      const p = parsed as Partial<PromptPresetStoreV2>;
+      if (!Array.isArray(p.presets) || p.presets.length === 0) return defaultPromptPresetStore();
+      const presets: PromptPresetSlot[] = p.presets
+        .filter(
+          (x): x is PromptPresetSlot =>
+            Boolean(x && typeof x === 'object' && typeof (x as PromptPresetSlot).id === 'string' && Array.isArray((x as PromptPresetSlot).blocks)),
+        )
+        .map(x => ({
+          id: x.id,
+          name: typeof x.name === 'string' && x.name.trim() ? x.name : '未命名预设',
+          blocks: x.blocks,
+        }));
+      if (presets.length === 0) return defaultPromptPresetStore();
+      const activeOk =
+        typeof p.activePresetId === 'string' && presets.some(pr => pr.id === p.activePresetId);
+      return {
+        version: 2,
+        activePresetId: activeOk ? p.activePresetId! : presets[0].id,
+        presets,
+        mergeSameRoleMessages: Boolean(p.mergeSameRoleMessages),
+      };
+    }
+
+    if (Array.isArray(parsed)) {
+      const id = createPresetSlotId();
+      const blocks = parsed.length > 0 ? (parsed as PromptBlock[]) : DEFAULT_PROMPT_BLOCKS;
+      return {
+        version: 2,
+        activePresetId: id,
+        presets: [{ id, name: '默认预设', blocks }],
+        mergeSameRoleMessages: false,
+      };
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      const o = parsed as Record<string, unknown>;
+      if (Array.isArray(o.blocks)) {
+        const id = createPresetSlotId();
+        const name = typeof o.presetName === 'string' && o.presetName.trim() ? o.presetName : '默认预设';
+        return {
+          version: 2,
+          activePresetId: id,
+          presets: [{ id, name, blocks: o.blocks as PromptBlock[] }],
+          mergeSameRoleMessages: false,
+        };
+      }
+    }
+    return defaultPromptPresetStore();
   } catch {
-    return { presetName: '默认预设', blocks: DEFAULT_PROMPT_BLOCKS };
+    return defaultPromptPresetStore();
   }
+}
+
+function getActivePresetSlot(store: PromptPresetStoreV2): PromptPresetSlot {
+  return store.presets.find(p => p.id === store.activePresetId) ?? store.presets[0];
+}
+
+function updateActivePresetBlocks(store: PromptPresetStoreV2, blocks: PromptBlock[]): PromptPresetStoreV2 {
+  return {
+    ...store,
+    presets: store.presets.map(p => (p.id === store.activePresetId ? { ...p, blocks } : p)),
+  };
+}
+
+function uniquePresetDisplayName(store: PromptPresetStoreV2, base: string): string {
+  const names = new Set(store.presets.map(p => p.name));
+  const root = base.trim() || '导入预设';
+  if (!names.has(root)) return root;
+  let i = 2;
+  while (names.has(`${root} (${i})`)) i += 1;
+  return `${root} (${i})`;
+}
+
+function mergeConsecutiveSameRoleMessages(
+  msgs: { role: string; content: string }[],
+): { role: string; content: string }[] {
+  if (msgs.length === 0) return [];
+  const out: { role: string; content: string }[] = [{ ...msgs[0] }];
+  for (let i = 1; i < msgs.length; i++) {
+    const m = msgs[i];
+    const last = out[out.length - 1];
+    if (last.role === m.role) last.content = `${last.content}\n\n${m.content}`;
+    else out.push({ ...m });
+  }
+  return out;
+}
+
+function normalizeRole(input: unknown): PromptBlockRole {
+  const v = String(input ?? '').trim().toLowerCase();
+  if (v === 'user' || v === '用户') return 'User';
+  if (v === 'assistant' || v === 'ai') return 'Assistant';
+  return 'System';
+}
+
+function normalizeType(input: unknown): PromptBlockType {
+  const v = String(input ?? '').trim().toLowerCase();
+  if (v === 'dynamic' || v === '动态') return 'Dynamic';
+  return 'Static';
+}
+
+function normalizePromptBlock(raw: unknown): PromptBlock | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const title = String(r.title ?? r.name ?? r.label ?? '未命名提示词').trim() || '未命名提示词';
+  const content =
+    typeof r.content === 'string'
+      ? r.content
+      : typeof r.text === 'string'
+        ? r.text
+        : typeof r.prompt === 'string'
+          ? r.prompt
+          : '';
+  const idCandidate = r.id ?? r.identifier ?? r.key ?? null;
+  const id = typeof idCandidate === 'string' && idCandidate.trim() ? idCandidate : createPromptBlockId();
+  const enabled = r.enabled !== undefined ? Boolean(r.enabled) : true;
+  return {
+    id,
+    title,
+    type: normalizeType(r.type ?? r.injection_position),
+    role: normalizeRole(r.role),
+    content,
+    enabled,
+  };
+}
+
+function parseImportedPreset(raw: string): PromptPresetPack {
+  const parsed = JSON.parse(raw) as unknown;
+  if (Array.isArray(parsed)) {
+    const blocks = parsed.map(normalizePromptBlock).filter((x): x is PromptBlock => Boolean(x));
+    if (blocks.length === 0) throw new Error('未识别到有效提示词条目');
+    return { presetName: '导入预设', blocks };
+  }
+  if (!parsed || typeof parsed !== 'object') throw new Error('JSON 根节点不是对象');
+  const root = parsed as Record<string, unknown>;
+
+  // our exported shape
+  if (Array.isArray(root.blocks)) {
+    const blocks = root.blocks.map(normalizePromptBlock).filter((x): x is PromptBlock => Boolean(x));
+    if (blocks.length === 0) throw new Error('blocks 为空或结构不合法');
+    const presetName = typeof root.presetName === 'string' && root.presetName.trim() ? root.presetName : '导入预设';
+    return { presetName, blocks };
+  }
+
+  // SillyTavern preset common shape: { name, prompts: [...] }
+  if (Array.isArray(root.prompts)) {
+    const blocks = root.prompts.map(normalizePromptBlock).filter((x): x is PromptBlock => Boolean(x));
+    if (blocks.length === 0) throw new Error('prompts 为空或结构不合法');
+    const presetName = typeof root.name === 'string' && root.name.trim() ? root.name : '导入预设';
+    return { presetName, blocks };
+  }
+
+  // fallback: try extensions.SPreset.prompts if future variants appear
+  const ext = root.extensions as Record<string, unknown> | undefined;
+  const sPreset = (ext?.SPreset ?? ext?.spreset) as Record<string, unknown> | undefined;
+  if (sPreset && Array.isArray(sPreset.prompts)) {
+    const blocks = sPreset.prompts.map(normalizePromptBlock).filter((x): x is PromptBlock => Boolean(x));
+    if (blocks.length > 0) return { presetName: '导入预设', blocks };
+  }
+
+  throw new Error('未找到可识别字段：blocks / prompts');
 }
 
 function buildAllmindSystemPrompt(blocks: PromptBlock[]): string {
@@ -652,8 +843,10 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const [promptPresetName, setPromptPresetName] = useState('默认预设');
-  const [promptBlocks, setPromptBlocks] = useState<PromptBlock[]>(DEFAULT_PROMPT_BLOCKS);
+  const [promptStore, setPromptStore] = useState<PromptPresetStoreV2>(() => loadPromptPresetStore());
+
+  const activePresetSlot = useMemo(() => getActivePresetSlot(promptStore), [promptStore]);
+  const promptBlocks = activePresetSlot.blocks;
 
   const [apiSettings, setApiSettings] = useState({
     url: 'https://api.openai.com/v1',
@@ -679,17 +872,8 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
   }, []);
 
   useEffect(() => {
-    const pack = loadPromptPresetPack();
-    setPromptPresetName(pack.presetName);
-    setPromptBlocks(pack.blocks);
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(
-      PROMPT_PRESET_STORAGE_KEY,
-      JSON.stringify({ presetName: promptPresetName, blocks: promptBlocks }),
-    );
-  }, [promptPresetName, promptBlocks]);
+    localStorage.setItem(PROMPT_PRESET_STORAGE_KEY, JSON.stringify(promptStore));
+  }, [promptStore]);
 
   useEffect(() => {
     const el = chatScrollRef.current;
@@ -762,6 +946,9 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
       const finalSystemPrompt = ctx
         ? `${presetPrompt}\n\n【当前酒馆正文上下文（最近6条）】\n${ctx}`
         : presetPrompt;
+      const msgsForApi = promptStore.mergeSameRoleMessages
+        ? mergeConsecutiveSameRoleMessages(newMessages)
+        : newMessages;
       const response = await fetch(`${apiSettings.url}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -770,7 +957,7 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
         },
         body: JSON.stringify({
           model: apiSettings.model,
-          messages: [{ role: 'system', content: finalSystemPrompt }, ...newMessages],
+          messages: [{ role: 'system', content: finalSystemPrompt }, ...msgsForApi],
           temperature: 0.7,
         }),
       });
@@ -833,7 +1020,7 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
               API 配置
             </button>
             <span className="text-[10px] text-[var(--color-ac-ui)]/80 font-mono">
-              预设: {promptPresetName} / 启用 {promptBlocks.filter(b => b.enabled).length}
+              预设: {activePresetSlot.name} / 启用 {promptBlocks.filter(b => b.enabled).length}
             </span>
             <label className="ml-1 flex items-center gap-1 text-[10px] text-[var(--color-ac-ui)] font-mono cursor-pointer select-none">
               <input
@@ -1006,11 +1193,9 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
       <AnimatePresence>
         {showPromptManager && (
           <PromptPresetManagerModal
-            presetName={promptPresetName}
-            blocks={promptBlocks}
+            store={promptStore}
+            setStore={setPromptStore}
             onClose={() => setShowPromptManager(false)}
-            onChangePresetName={setPromptPresetName}
-            onChangeBlocks={setPromptBlocks}
           />
         )}
       </AnimatePresence>
@@ -1019,22 +1204,36 @@ const AllmindView = ({ input, setInput }: { input: string; setInput: (v: string)
 };
 
 const PromptPresetManagerModal = ({
-  presetName,
-  blocks,
+  store,
+  setStore,
   onClose,
-  onChangePresetName,
-  onChangeBlocks,
 }: {
-  presetName: string;
-  blocks: PromptBlock[];
+  store: PromptPresetStoreV2;
+  setStore: Dispatch<SetStateAction<PromptPresetStoreV2>>;
   onClose: () => void;
-  onChangePresetName: (name: string) => void;
-  onChangeBlocks: (blocks: PromptBlock[]) => void;
 }) => {
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  const active = useMemo(() => getActivePresetSlot(store), [store]);
+  const blocks = active.blocks;
+
+  useEffect(() => {
+    if (!showMoreMenu) return;
+    const onDoc = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) setShowMoreMenu(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showMoreMenu]);
+
+  const onChangeBlocks = (next: PromptBlock[]) => {
+    setStore(s => updateActivePresetBlocks(s, next));
+  };
 
   const filteredBlocks = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1052,44 +1251,43 @@ const PromptPresetManagerModal = ({
   );
 
   const moveBlock = (id: string, direction: -1 | 1) => {
-    onChangeBlocks(
-      (() => {
-        const prev = blocks;
-        const idx = prev.findIndex(b => b.id === id);
-        if (idx < 0) return prev;
-        const target = idx + direction;
-        if (target < 0 || target >= prev.length) return prev;
-        const next = [...prev];
-        [next[idx], next[target]] = [next[target], next[idx]];
-        return next;
-      })(),
-    );
+    const prev = blocks;
+    const idx = prev.findIndex(b => b.id === id);
+    if (idx < 0) return;
+    const target = idx + direction;
+    if (target < 0 || target >= prev.length) return;
+    const next = [...prev];
+    [next[idx], next[target]] = [next[target], next[idx]];
+    onChangeBlocks(next);
   };
 
   const upsertBlock = (input: PromptBlock) => {
-    onChangeBlocks(
-      (() => {
-        const prev = blocks;
-        const idx = prev.findIndex(b => b.id === input.id);
-        if (idx < 0) return [input, ...prev];
-        const next = [...prev];
-        next[idx] = input;
-        return next;
-      })(),
-    );
+    const prev = blocks;
+    const idx = prev.findIndex(b => b.id === input.id);
+    if (idx < 0) onChangeBlocks([input, ...prev]);
+    else {
+      const next = [...prev];
+      next[idx] = input;
+      onChangeBlocks(next);
+    }
     setEditingId(null);
   };
 
-  const exportPreset = () => {
-    const payload: PromptPresetPack = { presetName, blocks };
+  const exportCurrentPreset = () => {
+    const payload: PromptPresetPack = { presetName: active.name, blocks };
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
     const href = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = href;
-    a.download = `${(presetName || 'prompt-preset').trim().replace(/[\\/:*?"<>|]/g, '_')}.json`;
+    a.download = `${(active.name || 'prompt-preset').trim().replace(/[\\/:*?"<>|]/g, '_')}.json`;
     a.click();
     URL.revokeObjectURL(href);
+  };
+
+  const persistNow = () => {
+    localStorage.setItem(PROMPT_PRESET_STORAGE_KEY, JSON.stringify(store));
+    alert('已保存到本地');
   };
 
   const importPresetFromFile = (file: File) => {
@@ -1098,10 +1296,18 @@ const PromptPresetManagerModal = ({
       const raw = typeof reader.result === 'string' ? reader.result : '';
       if (!raw) return;
       try {
-        const parsed = JSON.parse(raw) as Partial<PromptPresetPack>;
-        if (!Array.isArray(parsed.blocks)) throw new Error('blocks 字段缺失');
-        onChangePresetName(parsed.presetName?.trim() || '导入预设');
-        onChangeBlocks(parsed.blocks);
+        const pack = parseImportedPreset(raw);
+        let addedName = '';
+        setStore(prev => {
+          addedName = uniquePresetDisplayName(prev, pack.presetName);
+          const newId = createPresetSlotId();
+          return {
+            ...prev,
+            presets: [...prev.presets, { id: newId, name: addedName, blocks: pack.blocks }],
+            activePresetId: newId,
+          };
+        });
+        alert(`已新增预设「${addedName}」，共 ${pack.blocks.length} 条提示词`);
       } catch (e) {
         alert(`导入失败: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -1111,6 +1317,60 @@ const PromptPresetManagerModal = ({
     } catch (e) {
       alert(`读取文件失败: ${e instanceof Error ? e.message : String(e)}`);
     }
+  };
+
+  const addEmptyPreset = () => {
+    setStore(prev => {
+      const name = uniquePresetDisplayName(prev, '新预设');
+      const newId = createPresetSlotId();
+      return {
+        ...prev,
+        presets: [...prev.presets, { id: newId, name, blocks: [...DEFAULT_PROMPT_BLOCKS] }],
+        activePresetId: newId,
+      };
+    });
+    setShowMoreMenu(false);
+  };
+
+  const renameActivePreset = () => {
+    const next = window.prompt('预设名称', active.name);
+    if (next === null) return;
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    setStore(s => ({
+      ...s,
+      presets: s.presets.map(p => (p.id === s.activePresetId ? { ...p, name: trimmed } : p)),
+    }));
+    setShowMoreMenu(false);
+  };
+
+  const duplicateActivePreset = () => {
+    setStore(prev => {
+      const base = `${active.name} 副本`;
+      const name = uniquePresetDisplayName(prev, base);
+      const newId = createPresetSlotId();
+      const cloned = active.blocks.map(b => ({ ...b, id: createPromptBlockId() }));
+      return {
+        ...prev,
+        presets: [...prev.presets, { id: newId, name, blocks: cloned }],
+        activePresetId: newId,
+      };
+    });
+    setShowMoreMenu(false);
+  };
+
+  const deleteActivePreset = () => {
+    if (store.presets.length <= 1) {
+      alert('至少保留一套预设');
+      return;
+    }
+    if (!window.confirm(`确定删除预设「${active.name}」？`)) return;
+    setStore(prev => {
+      const rest = prev.presets.filter(p => p.id !== prev.activePresetId);
+      const nextActive = rest[0]?.id ?? prev.activePresetId;
+      return { ...prev, presets: rest, activePresetId: nextActive };
+    });
+    setShowMoreMenu(false);
   };
 
   return (
@@ -1129,35 +1389,89 @@ const PromptPresetManagerModal = ({
           <X size={18} />
         </button>
 
-        <div className="flex items-center gap-2 mb-3">
-          <input
-            type="text"
-            value={presetName}
-            onChange={e => onChangePresetName(e.target.value)}
-            className="flex-1 bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
-            placeholder="默认预设"
-          />
+        <div className="pr-10 mb-3">
+          <h3 className="text-sm font-bold text-[var(--color-ac-text)] tracking-widest">提示词顺序</h3>
+          <p className="text-[10px] text-[var(--color-ac-ui)] mt-0.5">切换本地预设；导入会新增一套，不覆盖当前列表</p>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-2 mb-3">
+          <div className="flex-1 min-w-[12rem] flex flex-col gap-1">
+            <label className="text-[10px] font-mono text-[var(--color-ac-ui)] tracking-wider">本地预设</label>
+            <select
+              value={store.activePresetId}
+              onChange={e => setStore(s => ({ ...s, activePresetId: e.target.value }))}
+              className="w-full bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)] rounded-sm"
+            >
+              {store.presets.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             type="button"
-            onClick={() => onChangeBlocks([...blocks])}
-            className="px-3 py-2 text-xs font-bold tracking-widest bg-cyan-900/30 border border-cyan-500/50 text-cyan-300 hover:bg-cyan-700/40 transition-colors"
+            onClick={persistNow}
+            className="px-3 py-2 text-xs font-bold tracking-widest bg-cyan-900/30 border border-cyan-500/50 text-cyan-300 hover:bg-cyan-700/40 transition-colors flex items-center gap-1.5 shrink-0"
           >
-            保存
+            <Save size={14} /> 保存
           </button>
           <button
             type="button"
             onClick={() => importInputRef.current?.click()}
-            className="px-3 py-2 text-xs font-bold tracking-widest bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-text)] hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors"
+            className="px-3 py-2 text-xs font-bold tracking-widest bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-text)] hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors shrink-0"
           >
             导入
           </button>
           <button
             type="button"
-            onClick={exportPreset}
-            className="px-3 py-2 text-xs font-bold tracking-widest bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-text)] hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors"
+            onClick={exportCurrentPreset}
+            className="px-3 py-2 text-xs font-bold tracking-widest bg-[var(--color-ac-ui)]/20 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-text)] hover:bg-[var(--color-ac-ui)] hover:text-black transition-colors shrink-0"
           >
             导出
           </button>
+          <div className="relative shrink-0" ref={moreMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowMoreMenu(v => !v)}
+              className="p-2 border border-[var(--color-ac-ui)]/50 text-[var(--color-ac-ui)] hover:text-[var(--color-ac-text)] hover:border-[var(--color-ac-text)] rounded-sm"
+              aria-label="更多"
+            >
+              <MoreHorizontal size={18} />
+            </button>
+            {showMoreMenu && (
+              <div className="absolute right-0 top-full mt-1 z-20 min-w-[10rem] border border-[var(--color-ac-ui)]/40 bg-black/95 py-1 text-xs shadow-lg">
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 hover:bg-cyan-900/40 text-[var(--color-ac-text)]"
+                  onClick={addEmptyPreset}
+                >
+                  新增预设
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 hover:bg-cyan-900/40 text-[var(--color-ac-text)]"
+                  onClick={renameActivePreset}
+                >
+                  重命名当前
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 hover:bg-cyan-900/40 text-[var(--color-ac-text)]"
+                  onClick={duplicateActivePreset}
+                >
+                  复制当前预设
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 hover:bg-red-900/30 text-red-300"
+                  onClick={deleteActivePreset}
+                >
+                  删除当前预设
+                </button>
+              </div>
+            )}
+          </div>
           <input
             ref={importInputRef}
             type="file"
@@ -1171,15 +1485,26 @@ const PromptPresetManagerModal = ({
           />
         </div>
 
-        <div className="shrink-0 flex flex-col md:flex-row gap-3 md:items-center md:justify-between mb-3">
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="搜索提示词标题或内容..."
-            className="w-full md:max-w-sm bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
-          />
-          <div className="flex gap-2">
+        <div className="shrink-0 flex flex-col gap-3 mb-3">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <input
+              type="text"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="搜索提示词标题或内容..."
+              className="w-full md:max-w-sm bg-black/50 border border-[var(--color-ac-ui)]/30 p-2 text-sm focus:outline-none focus:border-cyan-500 text-[var(--color-ac-text)]"
+            />
+            <label className="flex items-center gap-2 text-[10px] text-[var(--color-ac-ui)] font-mono cursor-pointer select-none shrink-0">
+              <input
+                type="checkbox"
+                checked={store.mergeSameRoleMessages}
+                onChange={e => setStore(s => ({ ...s, mergeSameRoleMessages: e.target.checked }))}
+                className="accent-cyan-500"
+              />
+              合并连续同角色消息
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() =>
@@ -1206,14 +1531,18 @@ const PromptPresetManagerModal = ({
             <button
               type="button"
               onClick={() => onChangeBlocks(blocks.filter(b => b.enabled))}
-              className="px-3 py-2 text-xs font-bold tracking-widest bg-red-900/20 border border-red-500/40 text-red-300 hover:bg-red-700/30 transition-colors"
+              className="px-3 py-2 text-xs font-bold tracking-widest bg-red-900/20 border border-red-500/40 text-red-300 hover:bg-red-700/30 transition-colors flex items-center gap-2"
             >
-              批量删除禁用
+              <Trash2 size={14} /> 批量删除禁用
             </button>
           </div>
         </div>
 
-        <div className="max-h-[62vh] overflow-y-auto pr-1 flex flex-col gap-3">
+        <p className="text-[10px] text-[var(--color-ac-ui)]/80 mb-2">
+          拖拽暂用上下箭头调整顺序；点击铅笔编辑内容（当前：{active.name}）
+        </p>
+
+        <div className="max-h-[55vh] overflow-y-auto pr-1 flex flex-col gap-3">
           {filteredBlocks.map(block => (
             <div
               key={block.id}
@@ -1298,7 +1627,7 @@ const PromptPresetManagerModal = ({
           )}
         </div>
       </div>
- 
+
       <AnimatePresence>
         {editingBlock && (
           <PromptBlockEditorModal
