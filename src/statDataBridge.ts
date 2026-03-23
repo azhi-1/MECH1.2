@@ -62,29 +62,12 @@ export function readStatDataFromMessage(messageId: number): StatData | undefined
   return undefined;
 }
 
-const MOCK_FALLBACK: StatusDisplay = {
-  locLine: 'LOC: SECTOR 4 - RUBICON',
-  gameTime: '',
-  callsign: 'RAVEN',
-  hp: 100,
-  sp: 85,
-  maxHp: 100,
-  maxSp: 100,
-  apm: 342,
-  syncRate: 89.5,
-  qiName: '虚空凝视',
-  qiTier: 4,
-  qiProgressPct: 78,
-  qiEffect: '神经同步率上限突破 +15%',
-  mechName: 'LOADER 4',
-  armorTierLabel: 'T3',
-  structureAp: 9030,
-  armorValue: 1083,
-  federal: 450200,
-  imperial: 12050,
-};
+function asFiniteNumber(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
-/** 将 stat_data 转为状态总览用展示模型；缺字段时回退到内置 Mock（本地预览）。 */
+/** 将 stat_data 转为状态总览展示模型；缺字段时显示空态占位。 */
 export function deriveStatusDisplay(stat: StatData | undefined): StatusDisplay {
   const g = stat?.全局信息;
   const 主角 = stat?.主角;
@@ -94,47 +77,52 @@ export function deriveStatusDisplay(stat: StatData | undefined): StatusDisplay {
   const mech = 主角?.当前驾驶机甲;
   const funds = 主角?.资金;
 
-  const hp = bar?.HP值 !== undefined ? clamp(Number(bar.HP值), 0, 100) : MOCK_FALLBACK.hp;
-  const sp = bar?.SP值 !== undefined ? clamp(Number(bar.SP值), 0, 100) : MOCK_FALLBACK.sp;
+  const hpRaw = asFiniteNumber(bar?.HP值);
+  const spRaw = asFiniteNumber(bar?.SP值);
+  const hp = hpRaw === null ? 0 : clamp(hpRaw, 0, 100);
+  const sp = spRaw === null ? 0 : clamp(spRaw, 0, 100);
 
   const loc = g?.物理位置?.trim();
-  const locLine = loc ? `LOC: ${loc}` : MOCK_FALLBACK.locLine;
+  const locLine = loc ? `LOC: ${loc}` : 'LOC: --';
 
-  const apm = drive?.APM !== undefined ? Number(drive.APM) : MOCK_FALLBACK.apm;
-  const sync =
-    drive?.神经同步率 !== undefined ? clamp(Number(drive.神经同步率), 0, 100) : MOCK_FALLBACK.syncRate;
+  const apmRaw = asFiniteNumber(drive?.APM);
+  const syncRaw = asFiniteNumber(drive?.神经同步率);
+  const apm = apmRaw ?? 0;
+  const sync = syncRaw === null ? 0 : clamp(syncRaw, 0, 100);
 
-  const qiLayer = qi?.真气层数 !== undefined ? clamp(Number(qi.真气层数), 1, 10) : MOCK_FALLBACK.qiTier;
-  const qiProgRaw =
-    qi?.真气修习进度 !== undefined ? clamp(Number(qi.真气修习进度), 1, 10) : MOCK_FALLBACK.qiProgressPct / 10;
+  const qiLayerRaw = asFiniteNumber(qi?.真气层数);
+  const qiProgInput = asFiniteNumber(qi?.真气修习进度);
+  const qiLayer = qiLayerRaw === null ? 0 : clamp(qiLayerRaw, 1, 10);
+  const qiProgRaw = qiProgInput === null ? 0 : clamp(qiProgInput, 1, 10);
   const qiProgressPct = (qiProgRaw / 10) * 100;
 
-  const mechName = mech?.当前驾驶机甲名称?.trim() || MOCK_FALLBACK.mechName;
-  const armorLbl =
-    mech?.装甲等级 !== undefined ? formatArmorTier(String(mech.装甲等级)) : MOCK_FALLBACK.armorTierLabel;
+  const mechName = mech?.当前驾驶机甲名称?.trim() || '--';
+  const armorLbl = mech?.装甲等级 !== undefined ? formatArmorTier(String(mech.装甲等级)) : '--';
 
-  const ap = mech?.结构值 !== undefined ? Number(mech.结构值) : MOCK_FALLBACK.structureAp;
-  const armVal = mech?.装甲值 !== undefined ? Number(mech.装甲值) : MOCK_FALLBACK.armorValue;
+  const apRaw = asFiniteNumber(mech?.结构值);
+  const armValRaw = asFiniteNumber(mech?.装甲值);
+  const ap = apRaw ?? 0;
+  const armVal = armValRaw ?? 0;
 
   return {
     locLine,
     gameTime: g?.时间?.trim() ?? '',
-    callsign: MOCK_FALLBACK.callsign,
+    callsign: 'RAVEN',
     hp,
     sp,
     maxHp: 100,
     maxSp: 100,
     apm,
     syncRate: sync,
-    qiName: qi?.真气名称?.trim() || MOCK_FALLBACK.qiName,
+    qiName: qi?.真气名称?.trim() || '--',
     qiTier: qiLayer,
     qiProgressPct,
-    qiEffect: qi?.真气效果?.trim() || MOCK_FALLBACK.qiEffect,
+    qiEffect: qi?.真气效果?.trim() || 'ERR: LINK LOST',
     mechName,
     armorTierLabel: armorLbl,
     structureAp: ap,
     armorValue: armVal,
-    federal: funds?.联邦币 !== undefined ? Number(funds.联邦币) : MOCK_FALLBACK.federal,
-    imperial: funds?.帝国币 !== undefined ? Number(funds.帝国币) : MOCK_FALLBACK.imperial,
+    federal: asFiniteNumber(funds?.联邦币) ?? 0,
+    imperial: asFiniteNumber(funds?.帝国币) ?? 0,
   };
 }

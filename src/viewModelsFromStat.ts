@@ -37,29 +37,31 @@ function clamp(n: number, lo: number, hi: number): number {
 }
 
 /** 机库整备：当前驾驶机甲对应泊位、装配槽、可用件、数值总览 */
-export function garageFromStat(stat: StatData | undefined): {
+export function garageFromStat(stat: StatData | undefined, selectedMechName?: string): {
   equipped: GarageEquippedRow[];
   available: GaragePartAvailable[];
   overview: GarageOverviewRow[];
   berthDisplayName: string;
+  berthNames: string[];
 } {
   const 机库 = stat?.机库;
-  const curName = stat?.主角?.当前驾驶机甲?.当前驾驶机甲名称?.trim() ?? '';
+  const curName = selectedMechName?.trim() || stat?.主角?.当前驾驶机甲?.当前驾驶机甲名称?.trim() || '';
   const berths = 机库?.机甲泊位;
+  const berthNames: string[] = [];
 
   let template: Record<string, unknown> | undefined;
-  let berthDisplayName = curName || '—';
+  let berthDisplayName = curName || '';
 
   if (berths && typeof berths === 'object') {
     const b = berths as Record<string, Record<string, unknown>>;
+    berthNames.push(...Object.keys(b));
     if (curName && b[curName]) {
       template = b[curName];
       berthDisplayName = curName;
     } else {
-      const keys = Object.keys(b);
-      if (keys.length > 0) {
-        berthDisplayName = keys[0];
-        template = b[keys[0]];
+      if (berthNames.length > 0) {
+        berthDisplayName = berthNames[0];
+        template = b[berthNames[0]];
       }
     }
   }
@@ -88,20 +90,26 @@ export function garageFromStat(stat: StatData | undefined): {
     }
   }
 
-  const mechNow = stat?.主角?.当前驾驶机甲;
   const vo = template?.数值总览 as
-    | { 机甲代数?: number; 推重比?: number; 续航回合数?: number; 外观描述?: string }
+    | {
+        结构值?: number;
+        装甲值?: number;
+        机甲代数?: number;
+        推重比?: number;
+        续航回合数?: number;
+        外观描述?: string;
+      }
     | undefined;
 
   const overview: GarageOverviewRow[] = [];
-  if (mechNow?.结构值 !== undefined) overview.push({ label: '结构值', value: Number(mechNow.结构值) });
-  if (mechNow?.装甲值 !== undefined) overview.push({ label: '装甲值', value: Number(mechNow.装甲值) });
+  if (vo?.结构值 !== undefined) overview.push({ label: '结构值', value: Number(vo.结构值) });
+  if (vo?.装甲值 !== undefined) overview.push({ label: '装甲值', value: Number(vo.装甲值) });
   if (vo?.机甲代数 !== undefined) overview.push({ label: '机甲代数', value: vo.机甲代数 });
   if (vo?.推重比 !== undefined) overview.push({ label: '推重比', value: Number(vo.推重比).toFixed(2) });
   if (vo?.续航回合数 !== undefined) overview.push({ label: '续航回合数', value: vo.续航回合数 });
   if (vo?.外观描述?.trim()) overview.push({ label: '外观', value: vo.外观描述.trim() });
 
-  return { equipped, available, overview, berthDisplayName };
+  return { equipped, available, overview, berthDisplayName, berthNames };
 }
 
 export function romanceRowsFromStat(stat: StatData | undefined): RomanceRow[] {

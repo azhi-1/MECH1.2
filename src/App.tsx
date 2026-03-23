@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
 import {
   Activity,
+  ChevronLeft,
   ChevronRight,
   Coins,
   Cpu,
@@ -217,8 +218,33 @@ const GarageView = ({
   currentMechName: string;
   onEquip: (partName: string, mechName: string) => void;
 }) => {
-  const g = useMemo(() => garageFromStat(statData), [statData]);
-  const mechLabel = currentMechName?.trim() || g.berthDisplayName;
+  const baseGarage = useMemo(() => garageFromStat(statData), [statData]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  useEffect(() => {
+    if (baseGarage.berthNames.length === 0) {
+      setSelectedIndex(0);
+      return;
+    }
+    const fromCurrent = baseGarage.berthNames.findIndex(name => name === currentMechName?.trim());
+    setSelectedIndex(fromCurrent >= 0 ? fromCurrent : 0);
+  }, [baseGarage.berthNames, currentMechName]);
+
+  const selectedBerthName = baseGarage.berthNames[selectedIndex] ?? '';
+  const g = useMemo(() => garageFromStat(statData, selectedBerthName), [statData, selectedBerthName]);
+  const mechLabel = selectedBerthName || currentMechName?.trim() || '空闲泊位';
+  const berthTotal = baseGarage.berthNames.length;
+  const berthDisplay = berthTotal === 0 ? '[ 空闲泊位 ]' : `泊位 ${String(selectedIndex + 1).padStart(2, '0')} : ${mechLabel}`;
+
+  const cycleBerth = (direction: 1 | -1) => {
+    if (berthTotal <= 0) return;
+    setSelectedIndex(prev => {
+      const next = prev + direction;
+      if (next < 0) return berthTotal - 1;
+      if (next >= berthTotal) return 0;
+      return next;
+    });
+  };
 
   return (
     <motion.div
@@ -230,9 +256,28 @@ const GarageView = ({
       <div className="flex items-end justify-between ac-border-b pb-2 shrink-0">
         <div>
           <h2 className="text-xl md:text-2xl font-bold tracking-widest text-shadow-glow">机体组装</h2>
-          <p className="text-[10px] md:text-xs font-mono text-[var(--color-ac-ui)] uppercase tracking-widest mt-1">
-            Garage // Assembly · 泊位: {g.berthDisplayName}
-          </p>
+          <div className="mt-1 flex items-center gap-2 text-[10px] md:text-xs font-mono text-[var(--color-ac-ui)] uppercase tracking-widest">
+            <span>Garage // Assembly ·</span>
+            <button
+              type="button"
+              onClick={() => cycleBerth(-1)}
+              disabled={berthTotal === 0}
+              className="p-0.5 text-[var(--color-ac-ui)]/90 hover:text-[var(--color-ac-text)] disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="切换上一台机甲"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <span className="text-[var(--color-ac-text)]">{berthDisplay}</span>
+            <button
+              type="button"
+              onClick={() => cycleBerth(1)}
+              disabled={berthTotal === 0}
+              className="p-0.5 text-[var(--color-ac-ui)]/90 hover:text-[var(--color-ac-text)] disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="切换下一台机甲"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
         </div>
       </div>
 
